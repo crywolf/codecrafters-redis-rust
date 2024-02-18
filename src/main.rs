@@ -1,8 +1,10 @@
 mod command;
 mod resp;
+mod storage;
 
 use command::Command;
 use resp::RESPType;
+use storage::Storage;
 
 use anyhow::{Context, Result};
 use bytes::BytesMut;
@@ -11,21 +13,26 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 
+use std::sync::Arc;
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
+    let storage: Arc<Storage> = Arc::new(Storage::new());
 
     loop {
         let (stream, _) = listener.accept().await?;
+        let storage = Arc::clone(&storage);
+
         tokio::spawn(async move {
-            handle_connection(stream)
+            handle_connection(stream, storage)
                 .await
                 .map_err(|e| eprintln!("Error: {:?}", e))
         });
     }
 }
 
-async fn handle_connection(mut stream: TcpStream) -> Result<()> {
+async fn handle_connection(mut stream: TcpStream, storage: Arc<Storage>) -> Result<()> {
     let mut buf = BytesMut::with_capacity(1024);
     loop {
         buf.clear();
@@ -50,7 +57,7 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
             }
         };
 
-        let response = match command.response() {
+        let response = match command.response(Arc::clone(&storage)) {
             Ok(r) => r,
             Err(err) => {
                 handle_error(&mut stream, err).await?;
