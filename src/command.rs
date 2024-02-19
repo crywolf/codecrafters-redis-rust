@@ -131,9 +131,25 @@ mod tests {
         assert!(r.is_ok());
         let command = r.unwrap();
 
-        let r = command.response(storage); // GET command
+        let r = command.response(Arc::clone(&storage)); // GET command
         assert!(r.is_ok());
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$7\r\n\"Hello\"\r\n"));
+
+        // GET command - nonexistent key
+        buf.extend_from_slice("*2\r\n$3\r\nGET\r\n$5\r\nwrong\r\n".as_bytes());
+
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let r = command.response(storage); // GET command
+        assert!(r.is_ok());
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"$-1\r\n"));
     }
 }
