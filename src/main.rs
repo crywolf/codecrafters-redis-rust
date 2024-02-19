@@ -15,9 +15,32 @@ use tokio::{
 
 use std::sync::Arc;
 
+const DEFAULT_ADDRESS: &str = "127.0.0.1";
+const DEFAULT_PORT: &str = "6379";
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:6379").await?;
+    let mut addr = DEFAULT_ADDRESS.to_string();
+    let mut port = DEFAULT_PORT.to_string();
+
+    let mut args = std::env::args();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--addr" => {
+                addr = args.next().unwrap_or(addr);
+            }
+            "--port" => {
+                port = args.next().unwrap_or(port);
+            }
+            _ => {}
+        }
+    }
+
+    let addr = format!("{DEFAULT_ADDRESS}:{port}");
+
+    let listener = TcpListener::bind(&addr).await?;
+    println!("Server running on address: {addr}");
+
     let storage: Arc<Storage> = Arc::new(Storage::new());
 
     loop {
