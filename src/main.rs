@@ -156,10 +156,7 @@ async fn connect_to_master(config: &Config) -> std::io::Result<()> {
 
     let mut buf = BytesMut::with_capacity(128);
     stream.read_buf(&mut buf).await?;
-
-    master_response.clear();
-    master_response.put_slice(b"+FULLRESYNC");
-    assert!(buf.starts_with(master_response.to_vec().as_slice()));
+    assert!(buf.starts_with(b"+FULLRESYNC"));
 
     println!("Server is running as a replica of '{}'", &master_addr);
 
