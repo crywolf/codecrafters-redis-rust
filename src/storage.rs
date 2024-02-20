@@ -49,11 +49,16 @@ impl Storage {
     }
 
     pub fn get_info(&self, arg: &str) -> Option<String> {
-        let mut role = "master";
+        let mut info = String::from("# Replication");
+
         if self.is_replica() {
-            role = "slave";
+            info.push_str("\nrole:slave");
+        } else {
+            info.push_str("\nrole:master");
+            info.push_str("\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb");
+            info.push_str("\nmaster_repl_offset:0");
         }
-        let info = format!("# Replication\nrole:{role}");
+
         if arg == "replication" {
             Some(format!("${}\r\n{}\r\n", info.len(), info))
         } else {

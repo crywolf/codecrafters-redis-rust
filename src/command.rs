@@ -151,7 +151,7 @@ mod tests {
         let response = r.unwrap();
         assert_eq!(
             response,
-            Bytes::from_static(b"$25\r\n# Replication\nrole:master\r\n")
+            Bytes::from_static(b"$101\r\n# Replication\nrole:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0\r\n")
         );
     }
 
