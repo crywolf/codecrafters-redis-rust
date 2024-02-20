@@ -9,6 +9,7 @@ use bytes::Bytes;
 pub enum Command {
     Ping,
     Echo(String),
+    Info(String),
     Set(String, String, String),
     Get(String),
 }
@@ -28,10 +29,12 @@ impl Command {
         let command = match cmd.data.to_uppercase().as_str() {
             "PING" => Self::Ping,
             "ECHO" => {
-                let Some(RESPType::Bulk(arg)) = parts.next() else {
-                    bail!("ECHO command is missing an argument");
-                };
+                let arg = Self::get_arg(parts)?;
                 Self::Echo(arg.data)
+            }
+            "INFO" => {
+                let arg = Self::get_arg(parts)?;
+                Self::Info(arg.data)
             }
             "SET" => {
                 let Some(RESPType::Bulk(key)) = parts.next() else {
@@ -61,10 +64,8 @@ impl Command {
                 Self::Set(key.data, val.data, expiry.data)
             }
             "GET" => {
-                let Some(RESPType::Bulk(key)) = parts.next() else {
-                    bail!("GET command is missing an argument");
-                };
-                Self::Get(key.data)
+                let arg = Self::get_arg(parts)?;
+                Self::Get(arg.data)
             }
             _ => unimplemented!(),
         };
@@ -76,6 +77,13 @@ impl Command {
         let response = match self {
             Self::Ping => Bytes::from("+PONG\r\n"),
             Self::Echo(arg) => Bytes::from(format!("+{arg}\r\n")),
+            Self::Info(arg) => {
+                if arg.as_str() == "replication" {
+                    Bytes::from(format!("$25\r\n# Replication\nrole:master\r\n"))
+                } else {
+                    Bytes::from("$-1\r\n")
+                }
+            }
             Self::Set(key, value, expiry) => {
                 let expiry_ms = expiry.parse().unwrap_or_default();
                 let item = Item::new(value, expiry_ms);
@@ -91,6 +99,13 @@ impl Command {
             }
         };
         Ok(response)
+    }
+
+    fn get_arg(mut parts: std::vec::IntoIter<RESPType>) -> Result<BulkString> {
+        let Some(RESPType::Bulk(arg)) = parts.next() else {
+            bail!("command is missing an argument");
+        };
+        Ok(arg)
     }
 }
 
@@ -117,6 +132,29 @@ mod tests {
         assert!(r.is_ok());
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+hey\r\n"));
+    }
+
+    #[test]
+    fn test_info_command() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice("*2\r\n$4\r\nINFO\r\n$11\r\nreplication\r\n".as_bytes());
+
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let storage: Arc<Storage> = Arc::new(Storage::new());
+        let r = command.response(storage);
+        assert!(r.is_ok());
+        let response = r.unwrap();
+        assert_eq!(
+            response,
+            Bytes::from_static(b"$25\r\n# Replication\nrole:master\r\n")
+        );
     }
 
     #[test]

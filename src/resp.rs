@@ -60,16 +60,34 @@ impl RESPType {
     fn parse_array(buf: &mut BytesMut) -> Result<Vec<Self>> {
         let len = read_len(buf);
         remove_crlf(buf)?;
+
         let mut v = Vec::with_capacity(len);
         for _ in 0..len {
             v.push(RESPType::parse(buf).context("parsing array")?);
         }
+
         Ok(v)
     }
 }
 
 fn read_len(buf: &mut BytesMut) -> usize {
-    (buf.get_u8() - 48) as usize // numbers in ASCII start at 48 (48 means 0)
+    let mut v = Vec::new();
+    while buf[0] != b'\r' {
+        let num = buf.get_u8() - 48; // numbers in ASCII start at 48 (48 means 0)
+        v.push(num);
+    }
+    let mut exp = 10usize.pow((v.len() - 1) as u32);
+
+    let len: usize = v
+        .iter()
+        .map(|n| {
+            let len = *n as usize * exp;
+            exp /= 10;
+            len
+        })
+        .sum();
+
+    len
 }
 
 fn remove_crlf(buf: &mut BytesMut) -> Result<()> {
