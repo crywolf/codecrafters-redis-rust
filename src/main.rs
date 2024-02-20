@@ -107,6 +107,7 @@ async fn handle_error(stream: &mut TcpStream, e: anyhow::Error) -> Result<()> {
     Ok(())
 }
 
+/// Replica server connects to master server
 async fn connect_to_master(config: &Config) -> std::io::Result<()> {
     // Handshake with master
     let master_addr = config.get_master_address().expect("master address is set");
@@ -114,6 +115,7 @@ async fn connect_to_master(config: &Config) -> std::io::Result<()> {
 
     let mut stream = TcpStream::connect(&master_addr).await?;
 
+    // 1. PING
     let ping = b"*1\r\n$4\r\nPING\r\n";
     stream.write_all(ping).await?;
     stream.flush().await?;
@@ -121,11 +123,11 @@ async fn connect_to_master(config: &Config) -> std::io::Result<()> {
     let mut buf = BytesMut::with_capacity(128);
     stream.read_buf(&mut buf).await?;
 
-    let mut expected = BytesMut::with_capacity(128);
-    expected.put_slice(b"+PONG\r\n");
-    assert_eq!(buf, expected);
+    let mut master_response = BytesMut::with_capacity(128);
+    master_response.put_slice(b"+PONG\r\n");
+    assert_eq!(buf, master_response);
 
-    // REPLCONF listening-port <PORT>
+    // 2. REPLCONF listening-port <PORT>
     let port = &config.port;
     let replconf_1 = format!("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{port}\r\n");
     stream.write_all(replconf_1.as_bytes()).await?;
@@ -134,18 +136,30 @@ async fn connect_to_master(config: &Config) -> std::io::Result<()> {
     let mut buf = BytesMut::with_capacity(128);
     stream.read_buf(&mut buf).await?;
 
-    expected.clear();
-    expected.put_slice(b"+OK\r\n");
-    assert_eq!(buf, expected);
+    master_response.clear();
+    master_response.put_slice(b"+OK\r\n");
+    assert_eq!(buf, master_response);
 
-    // REPLCONF capa psync2
+    // 3. REPLCONF capa psync2
     let replconf_2 = b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
     stream.write_all(replconf_2).await?;
     stream.flush().await?;
 
     let mut buf = BytesMut::with_capacity(128);
     stream.read_buf(&mut buf).await?;
-    assert_eq!(buf, expected);
+    assert_eq!(buf, master_response);
+
+    // 4. PSYNC ? -1 (PSYNC replicationid offset)
+    let psync = b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
+    stream.write_all(psync).await?;
+    stream.flush().await?;
+
+    let mut buf = BytesMut::with_capacity(128);
+    stream.read_buf(&mut buf).await?;
+
+    master_response.clear();
+    master_response.put_slice(b"+FULLRESYNC");
+    assert!(buf.starts_with(master_response.to_vec().as_slice()));
 
     println!("Server is running as a replica of '{}'", &master_addr);
 

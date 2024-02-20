@@ -55,12 +55,27 @@ impl Storage {
             info.push_str("\nrole:slave");
         } else {
             info.push_str("\nrole:master");
-            info.push_str("\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb");
-            info.push_str("\nmaster_repl_offset:0");
+            if let Some((master_replid, master_repl_offset)) = self.get_repl_id_and_offset() {
+                info.push_str("\nmaster_replid:");
+                info.push_str(&master_replid);
+                info.push_str("\nmaster_repl_offset:");
+                info.push_str(&master_repl_offset);
+            }
         }
 
         if arg == "replication" {
             Some(format!("${}\r\n{}\r\n", info.len(), info))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_repl_id_and_offset(&self) -> Option<(String, String)> {
+        if !self.is_replica() {
+            Some((
+                "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(),
+                "0".to_owned(),
+            ))
         } else {
             None
         }

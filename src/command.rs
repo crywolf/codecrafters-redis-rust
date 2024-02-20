@@ -13,6 +13,7 @@ pub enum Command {
     Set(String, String, String),
     Get(String),
     Replconf(String, String),
+    Psync(String, String),
 }
 
 impl Command {
@@ -30,20 +31,16 @@ impl Command {
         let command = match cmd.data.to_uppercase().as_str() {
             "PING" => Self::Ping,
             "ECHO" => {
-                let arg = Self::get_arg(parts)?;
+                let arg = Self::get_arg(&mut parts)?;
                 Self::Echo(arg.data)
             }
             "INFO" => {
-                let arg = Self::get_arg(parts)?;
+                let arg = Self::get_arg(&mut parts)?;
                 Self::Info(arg.data)
             }
             "SET" => {
-                let Some(RESPType::Bulk(key)) = parts.next() else {
-                    bail !("SET command is missing arguments");
-                };
-                let Some(RESPType::Bulk(val)) = parts.next() else {
-                    bail !("SET command is missing value");
-                };
+                let key = Self::get_arg(&mut parts)?;
+                let val = Self::get_arg(&mut parts)?;
                 let expiry = if let Some(_px) = parts.find(|arg| {
                     if let RESPType::Bulk(k) = arg {
                         &k.data.to_lowercase() == "px"
@@ -65,17 +62,18 @@ impl Command {
                 Self::Set(key.data, val.data, expiry.data)
             }
             "GET" => {
-                let arg = Self::get_arg(parts)?;
+                let arg = Self::get_arg(&mut parts)?;
                 Self::Get(arg.data)
             }
             "REPLCONF" => {
-                let Some(RESPType::Bulk(arg1)) = parts.next() else {
-                    bail !("REPLCONF command is missing arguments");
-                };
-                let Some(RESPType::Bulk(arg2)) = parts.next() else {
-                    bail !("REPLCONF command is missing argument");
-                };
+                let arg1 = Self::get_arg(&mut parts)?;
+                let arg2 = Self::get_arg(&mut parts)?;
                 Self::Replconf(arg1.data, arg2.data)
+            }
+            "PSYNC" => {
+                let arg1 = Self::get_arg(&mut parts)?;
+                let arg2 = Self::get_arg(&mut parts)?;
+                Self::Psync(arg1.data, arg2.data)
             }
             _ => unimplemented!(),
         };
@@ -105,13 +103,23 @@ impl Command {
                 println!("Recieved handhake from replica: REPLCONF {arg1} {arg2}");
                 Bytes::from("+OK\r\n")
             }
+            Self::Psync(arg1, arg2) => {
+                println!("Recieved handhake from replica: PSYNC {arg1} {arg2}");
+                if let Some((master_replid, master_repl_offset)) = storage.get_repl_id_and_offset()
+                {
+                    let msg = format!("+FULLRESYNC {} {}\r\n", master_replid, master_repl_offset);
+                    Bytes::from(msg)
+                } else {
+                    Bytes::from("$-1\r\n")
+                }
+            }
         };
         Ok(response)
     }
 
-    fn get_arg(mut parts: std::vec::IntoIter<RESPType>) -> Result<BulkString> {
+    fn get_arg(parts: &mut std::vec::IntoIter<RESPType>) -> Result<BulkString> {
         let Some(RESPType::Bulk(arg)) = parts.next() else {
-            bail!("command is missing an argument");
+            bail!("command is missing argument");
         };
         Ok(arg)
     }
@@ -166,6 +174,30 @@ mod tests {
         assert_eq!(
             response,
             Bytes::from_static(b"$101\r\n# Replication\nrole:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0\r\n")
+        );
+    }
+
+    #[test]
+    fn test_psync_command() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n".as_bytes());
+
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config));
+        let r = command.response(storage);
+        assert!(r.is_ok());
+        let response = r.unwrap();
+        assert_eq!(
+            response,
+            Bytes::from_static(b"+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n")
         );
     }
 
