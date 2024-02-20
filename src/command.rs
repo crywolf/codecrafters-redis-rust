@@ -12,6 +12,7 @@ pub enum Command {
     Info(String),
     Set(String, String, String),
     Get(String),
+    Replconf(String, String),
 }
 
 impl Command {
@@ -67,6 +68,15 @@ impl Command {
                 let arg = Self::get_arg(parts)?;
                 Self::Get(arg.data)
             }
+            "REPLCONF" => {
+                let Some(RESPType::Bulk(arg1)) = parts.next() else {
+                    bail !("REPLCONF command is missing arguments");
+                };
+                let Some(RESPType::Bulk(arg2)) = parts.next() else {
+                    bail !("REPLCONF command is missing argument");
+                };
+                Self::Replconf(arg1.data, arg2.data)
+            }
             _ => unimplemented!(),
         };
 
@@ -90,6 +100,10 @@ impl Command {
                     None => String::from("$-1\r\n"),
                 };
                 Bytes::from(val)
+            }
+            Self::Replconf(arg1, arg2) => {
+                println!("Recieved handhake from replica: REPLCONF {arg1} {arg2}");
+                Bytes::from("+OK\r\n")
             }
         };
         Ok(response)

@@ -44,24 +44,7 @@ async fn main() -> std::io::Result<()> {
     println!("Server is running on address: {addr}");
 
     if config.is_replica() {
-        // Handshake with master
-        let master_addr = config.get_master_address().expect("master address is set");
-        println!("Connecting to master server '{}'", &master_addr);
-
-        let mut stream = TcpStream::connect(&master_addr).await?;
-
-        let ping = b"*1\r\n$4\r\nping\r\n";
-        stream.write_all(ping).await?;
-        stream.flush().await?;
-
-        let mut buf = BytesMut::with_capacity(128);
-        stream.read_buf(&mut buf).await?;
-
-        let mut expected = BytesMut::with_capacity(128);
-        expected.put_slice(b"+PONG\r\n");
-        assert_eq!(buf, expected);
-
-        println!("Server is running as a replica of '{}'", &master_addr);
+        connect_to_master(&config).await?;
     }
 
     let storage: Arc<Storage> = Arc::new(Storage::new(Arc::new(config)));
@@ -121,5 +104,50 @@ async fn handle_error(stream: &mut TcpStream, e: anyhow::Error) -> Result<()> {
     let msg = format!("-ERR {}\r\n", e.root_cause());
     stream.write_all(msg.as_bytes()).await?;
     stream.flush().await?;
+    Ok(())
+}
+
+async fn connect_to_master(config: &Config) -> std::io::Result<()> {
+    // Handshake with master
+    let master_addr = config.get_master_address().expect("master address is set");
+    println!("Connecting to master server '{}'", &master_addr);
+
+    let mut stream = TcpStream::connect(&master_addr).await?;
+
+    let ping = b"*1\r\n$4\r\nPING\r\n";
+    stream.write_all(ping).await?;
+    stream.flush().await?;
+
+    let mut buf = BytesMut::with_capacity(128);
+    stream.read_buf(&mut buf).await?;
+
+    let mut expected = BytesMut::with_capacity(128);
+    expected.put_slice(b"+PONG\r\n");
+    assert_eq!(buf, expected);
+
+    // REPLCONF listening-port <PORT>
+    let port = &config.port;
+    let replconf_1 = format!("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{port}\r\n");
+    stream.write_all(replconf_1.as_bytes()).await?;
+    stream.flush().await?;
+
+    let mut buf = BytesMut::with_capacity(128);
+    stream.read_buf(&mut buf).await?;
+
+    expected.clear();
+    expected.put_slice(b"+OK\r\n");
+    assert_eq!(buf, expected);
+
+    // REPLCONF capa psync2
+    let replconf_2 = b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
+    stream.write_all(replconf_2).await?;
+    stream.flush().await?;
+
+    let mut buf = BytesMut::with_capacity(128);
+    stream.read_buf(&mut buf).await?;
+    assert_eq!(buf, expected);
+
+    println!("Server is running as a replica of '{}'", &master_addr);
+
     Ok(())
 }
