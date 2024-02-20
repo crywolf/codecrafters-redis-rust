@@ -77,13 +77,7 @@ impl Command {
         let response = match self {
             Self::Ping => Bytes::from("+PONG\r\n"),
             Self::Echo(arg) => Bytes::from(format!("+{arg}\r\n")),
-            Self::Info(arg) => {
-                if arg.as_str() == "replication" {
-                    Bytes::from(format!("$25\r\n# Replication\nrole:master\r\n"))
-                } else {
-                    Bytes::from("$-1\r\n")
-                }
-            }
+            Self::Info(arg) => Bytes::from(storage.get_info(&arg).unwrap_or("$-1\r\n".to_owned())),
             Self::Set(key, value, expiry) => {
                 let expiry_ms = expiry.parse().unwrap_or_default();
                 let item = Item::new(value, expiry_ms);
@@ -111,6 +105,8 @@ impl Command {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
+
     use super::*;
     use bytes::BytesMut;
 
@@ -127,7 +123,8 @@ mod tests {
         assert!(r.is_ok());
         let command = r.unwrap();
 
-        let storage: Arc<Storage> = Arc::new(Storage::new());
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config));
         let r = command.response(storage);
         assert!(r.is_ok());
         let response = r.unwrap();
@@ -147,7 +144,8 @@ mod tests {
         assert!(r.is_ok());
         let command = r.unwrap();
 
-        let storage: Arc<Storage> = Arc::new(Storage::new());
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config));
         let r = command.response(storage);
         assert!(r.is_ok());
         let response = r.unwrap();
@@ -159,7 +157,8 @@ mod tests {
 
     #[test]
     fn test_set_and_get_command() {
-        let storage: Arc<Storage> = Arc::new(Storage::new());
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config));
 
         // SET command
         let mut buf = BytesMut::new();
@@ -213,7 +212,8 @@ mod tests {
 
     #[test]
     fn test_set_and_get_command_with_expiration() {
-        let storage: Arc<Storage> = Arc::new(Storage::new());
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config));
 
         // SET command: SET foo bar PX 100
         let mut buf = BytesMut::new();

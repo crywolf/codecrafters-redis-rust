@@ -1,8 +1,10 @@
 mod command;
+mod config;
 mod resp;
 mod storage;
 
 use command::Command;
+use config::Config;
 use resp::RESPType;
 use storage::Storage;
 
@@ -15,33 +17,40 @@ use tokio::{
 
 use std::sync::Arc;
 
-const DEFAULT_ADDRESS: &str = "127.0.0.1";
-const DEFAULT_PORT: &str = "6379";
-
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let mut addr = DEFAULT_ADDRESS.to_string();
-    let mut port = DEFAULT_PORT.to_string();
+    let mut config = Config::new();
 
     let mut args = std::env::args();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--addr" => {
-                addr = args.next().unwrap_or(addr);
+                config.addr = args.next().unwrap_or(config.addr);
             }
             "--port" => {
-                port = args.next().unwrap_or(port);
+                config.port = args.next().unwrap_or(config.port);
+            }
+            "--replicaof" => {
+                config.master_addr = args.next();
+                config.master_port = args.next();
             }
             _ => {}
         }
     }
 
-    let addr = format!("{DEFAULT_ADDRESS}:{port}");
+    let addr = config.get_address();
 
     let listener = TcpListener::bind(&addr).await?;
-    println!("Server running on address: {addr}");
+    println!("Server is running on address: {addr}");
+    if config.is_replica() {
+        println!(
+            "Server is running as a replica of '{}:{}'",
+            config.master_addr.as_ref().expect("addr of master is set"),
+            config.master_port.as_ref().expect("port of master is set")
+        );
+    }
 
-    let storage: Arc<Storage> = Arc::new(Storage::new());
+    let storage: Arc<Storage> = Arc::new(Storage::new(Arc::new(config)));
 
     loop {
         let (stream, _) = listener.accept().await?;

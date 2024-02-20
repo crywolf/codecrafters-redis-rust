@@ -1,17 +1,21 @@
 use std::{
     collections::HashMap,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
+use crate::config::Config;
+
 pub struct Storage {
     data: Mutex<HashMap<String, Item>>,
+    config: Arc<Config>,
 }
 
 impl Storage {
-    pub fn new() -> Self {
+    pub fn new(config: Arc<Config>) -> Self {
         Self {
             data: Mutex::new(HashMap::new()),
+            config,
         }
     }
 
@@ -42,6 +46,23 @@ impl Storage {
             return Some(item);
         }
         None
+    }
+
+    pub fn get_info(&self, arg: &str) -> Option<String> {
+        let mut role = "master";
+        if self.is_replica() {
+            role = "slave";
+        }
+        let info = format!("# Replication\nrole:{role}");
+        if arg == "replication" {
+            Some(format!("${}\r\n{}\r\n", info.len(), info))
+        } else {
+            None
+        }
+    }
+
+    fn is_replica(&self) -> bool {
+        self.config.is_replica()
     }
 }
 
