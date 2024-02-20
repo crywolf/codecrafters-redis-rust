@@ -22,6 +22,17 @@ impl Config {
         format!("{}:{}", self.addr, self.port)
     }
 
+    pub fn get_master_address(&self) -> Option<String> {
+        if self.is_replica() {
+            return Some(format!(
+                "{}:{}",
+                self.master_addr.as_ref().expect("addr of master is set"),
+                self.master_port.as_ref().expect("port of master is set")
+            ));
+        }
+        None
+    }
+
     pub fn is_replica(&self) -> bool {
         self.master_addr.is_some() && self.master_port.is_some()
     }

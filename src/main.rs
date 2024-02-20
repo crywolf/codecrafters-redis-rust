@@ -9,7 +9,7 @@ use resp::RESPType;
 use storage::Storage;
 
 use anyhow::{Context, Result};
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -42,12 +42,26 @@ async fn main() -> std::io::Result<()> {
 
     let listener = TcpListener::bind(&addr).await?;
     println!("Server is running on address: {addr}");
+
     if config.is_replica() {
-        println!(
-            "Server is running as a replica of '{}:{}'",
-            config.master_addr.as_ref().expect("addr of master is set"),
-            config.master_port.as_ref().expect("port of master is set")
-        );
+        // Handshake with master
+        let master_addr = config.get_master_address().expect("master address is set");
+        println!("Connecting to master server '{}'", &master_addr);
+
+        let mut stream = TcpStream::connect(&master_addr).await?;
+
+        let ping = b"*1\r\n$4\r\nping\r\n";
+        stream.write_all(ping).await?;
+        stream.flush().await?;
+
+        let mut buf = BytesMut::with_capacity(128);
+        stream.read_buf(&mut buf).await?;
+
+        let mut expected = BytesMut::with_capacity(128);
+        expected.put_slice(b"+PONG\r\n");
+        assert_eq!(buf, expected);
+
+        println!("Server is running as a replica of '{}'", &master_addr);
     }
 
     let storage: Arc<Storage> = Arc::new(Storage::new(Arc::new(config)));
