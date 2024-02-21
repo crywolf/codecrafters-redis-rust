@@ -12,7 +12,7 @@ pub enum Command {
     Info(String),
     Set(String, String, String),
     Get(String),
-    Replconf(String, String),
+    Replconf(Vec<String>),
     Psync(String, String),
 }
 
@@ -66,9 +66,19 @@ impl Command {
                 Self::Get(arg.data)
             }
             "REPLCONF" => {
-                let arg1 = Self::get_arg(&mut parts)?;
-                let arg2 = Self::get_arg(&mut parts)?;
-                Self::Replconf(arg1.data, arg2.data)
+                if parts.len() < 2 {
+                    bail!("not enough arguments");
+                }
+                let args = parts
+                    .filter_map(|s| {
+                        if let RESPType::Bulk(arg) = s {
+                            Some(arg.data)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                Self::Replconf(args)
             }
             "PSYNC" => {
                 let arg1 = Self::get_arg(&mut parts)?;
@@ -99,8 +109,8 @@ impl Command {
                 };
                 Bytes::from(val)
             }
-            Self::Replconf(arg1, arg2) => {
-                println!("Recieved handhake from replica: REPLCONF {arg1} {arg2}");
+            Self::Replconf(args) => {
+                println!("Recieved handhake from replica: REPLCONF {:?}", args);
                 Bytes::from("+OK\r\n")
             }
             Self::Psync(arg1, arg2) => {
@@ -185,6 +195,49 @@ mod tests {
             response,
             Bytes::from_static(b"$101\r\n# Replication\nrole:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0\r\n")
         );
+    }
+
+    #[test]
+    fn test_replconf_command() {
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config));
+
+        let mut buf = BytesMut::new();
+        // REPLCONF listening-port <PORT>
+        buf.extend_from_slice(
+            "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n".as_bytes(),
+        );
+
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let r = command.response(Arc::clone(&storage));
+        assert!(r.is_ok());
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"+OK\r\n"));
+
+        // REPLCONF capa eof capa psync2
+        buf.extend_from_slice(
+            "*5\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$3\r\neof\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
+                .as_bytes(),
+        );
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let r = command.response(Arc::clone(&storage));
+        assert!(r.is_ok());
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"+OK\r\n"));
     }
 
     #[test]
