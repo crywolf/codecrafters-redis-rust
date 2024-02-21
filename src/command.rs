@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::resp::{BulkString, RESPType};
 use crate::storage::{Item, Storage};
 use anyhow::{bail, Result};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -107,8 +107,18 @@ impl Command {
                 println!("Recieved handhake from replica: PSYNC {arg1} {arg2}");
                 if let Some((master_replid, master_repl_offset)) = storage.get_repl_id_and_offset()
                 {
-                    let msg = format!("+FULLRESYNC {} {}\r\n", master_replid, master_repl_offset);
-                    Bytes::from(msg)
+                    let file = storage.get_rbd_file();
+                    let msg = format!(
+                        "+FULLRESYNC {} {}\r\n${}\r\n",
+                        master_replid,
+                        master_repl_offset,
+                        file.len()
+                    );
+                    println!("Sending resync data to replica: FULLRESYNC...");
+
+                    let mut b = BytesMut::from(msg.as_bytes());
+                    b.extend_from_slice(&file);
+                    Bytes::from(b)
                 } else {
                     Bytes::from("$-1\r\n")
                 }
@@ -195,10 +205,10 @@ mod tests {
         let r = command.response(storage);
         assert!(r.is_ok());
         let response = r.unwrap();
-        assert_eq!(
-            response,
-            Bytes::from_static(b"+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n")
-        );
+        dbg!(&response);
+        assert!(response.starts_with(&Bytes::from_static(
+            b"+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n$88\r\nREDIS0011"
+        )),);
     }
 
     #[test]

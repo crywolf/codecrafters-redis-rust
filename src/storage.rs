@@ -4,6 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use bytes::Bytes;
+
 use crate::config::Config;
 
 pub struct Storage {
@@ -79,6 +81,18 @@ impl Storage {
         } else {
             None
         }
+    }
+
+    pub fn get_rbd_file(&self) -> Bytes {
+        let rbd_hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+        Bytes::from(Self::hex_to_bytes(rbd_hex))
+    }
+
+    fn hex_to_bytes(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap_or_default())
+            .collect()
     }
 
     fn is_replica(&self) -> bool {
