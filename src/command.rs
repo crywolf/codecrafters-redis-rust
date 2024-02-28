@@ -19,7 +19,7 @@ pub enum Command {
 impl Command {
     pub fn parse(resp: RESPType) -> Result<Self> {
         let RESPType::Array(resp) = resp else {
-            bail!("invalid command, must be an array");
+            bail!("invalid command, must be an array: {:?}", resp);
         };
 
         let mut parts = resp.into_iter();
@@ -91,11 +91,15 @@ impl Command {
         Ok(command)
     }
 
-    pub fn response(self, storage: Arc<Storage>) -> Result<Bytes> {
+    pub fn is_write(&self) -> bool {
+        matches!(self, Self::Set { .. })
+    }
+
+    pub fn response(&self, storage: Arc<Storage>) -> Result<Bytes> {
         let response = match self {
             Self::Ping => Bytes::from("+PONG\r\n"),
             Self::Echo(arg) => Bytes::from(format!("+{arg}\r\n")),
-            Self::Info(arg) => Bytes::from(storage.get_info(&arg).unwrap_or("$-1\r\n".to_owned())),
+            Self::Info(arg) => Bytes::from(storage.get_info(arg).unwrap_or("$-1\r\n".to_owned())),
             Self::Set(key, value, expiry) => {
                 let expiry_ms = expiry.parse().unwrap_or_default();
                 let item = Item::new(value, expiry_ms);
@@ -103,7 +107,7 @@ impl Command {
                 Bytes::from("+OK\r\n")
             }
             Self::Get(key) => {
-                let val = match storage.get(&key) {
+                let val = match storage.get(key) {
                     Some(item) => format!("${}\r\n{}\r\n", item.value.len(), item.value),
                     None => String::from("$-1\r\n"),
                 };
@@ -353,7 +357,6 @@ mod tests {
         let r = Command::parse(resp);
         assert!(r.is_ok());
         let command = r.unwrap();
-        let command2 = command.clone();
 
         // GET command - before expiration
         let r = command.response(Arc::clone(&storage));
@@ -364,7 +367,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         // GET command - after expiration
-        let r = command2.response(Arc::clone(&storage));
+        let r = command.response(Arc::clone(&storage));
         assert!(r.is_ok());
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$-1\r\n"));

@@ -24,7 +24,10 @@ impl RESPType {
             b'$' => Self::Bulk(Self::parse_bulk(buf)?),
             b'*' => Self::Array(Self::parse_array(buf)?),
             b':' => unimplemented!(),
-            b'-' => unimplemented!(),
+            b'-' => bail!(
+                "received message marking some error '{}'",
+                (kind as char).escape_default()
+            ),
             e => bail!("invalid type marker '{}'", (e as char).escape_default()),
         })
     }

@@ -21,14 +21,14 @@ impl Storage {
         }
     }
 
-    pub fn set(&self, key: String, item: Item) {
+    pub fn set(&self, key: &str, item: Item) {
         self.data
             .lock()
             .expect("should be able to lock the mutex")
-            .insert(key, item);
+            .insert(key.to_owned(), item);
     }
 
-    pub fn get(&self, key: &String) -> Option<Item> {
+    pub fn get(&self, key: &str) -> Option<Item> {
         if let Some(item) = self
             .data
             .lock()
@@ -73,7 +73,7 @@ impl Storage {
     }
 
     pub fn get_repl_id_and_offset(&self) -> Option<(String, String)> {
-        if !self.is_replica() {
+        if self.is_master() {
             Some((
                 "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(),
                 "0".to_owned(),
@@ -88,15 +88,19 @@ impl Storage {
         Bytes::from(Self::hex_to_bytes(rbd_hex))
     }
 
+    pub fn is_replica(&self) -> bool {
+        self.config.is_replica()
+    }
+
+    pub fn is_master(&self) -> bool {
+        !self.config.is_replica()
+    }
+
     fn hex_to_bytes(s: &str) -> Vec<u8> {
         (0..s.len())
             .step_by(2)
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap_or_default())
             .collect()
-    }
-
-    fn is_replica(&self) -> bool {
-        self.config.is_replica()
     }
 }
 
@@ -108,10 +112,10 @@ pub struct Item {
 }
 
 impl Item {
-    pub fn new(value: String, expiry_ms: u64) -> Self {
+    pub fn new(value: &str, expiry_ms: u64) -> Self {
         let changed = Instant::now();
         Self {
-            value,
+            value: value.to_owned(),
             expiry_ms,
             changed,
         }

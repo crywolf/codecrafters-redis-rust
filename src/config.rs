@@ -1,6 +1,7 @@
 const DEFAULT_ADDRESS: &str = "127.0.0.1";
 const DEFAULT_PORT: &str = "6379";
 
+#[derive(Clone)]
 pub struct Config {
     pub addr: String,
     pub port: String,
