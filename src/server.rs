@@ -166,7 +166,7 @@ impl ConnectionHandler {
 
     async fn handle_connection(&mut self) -> Result<()> {
         let mut buf = BytesMut::with_capacity(2048);
-        let mut connected_replica_port: Option<String> = None;
+        let mut connected_replica_id: Option<String> = None;
         let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
 
         loop {
@@ -178,9 +178,9 @@ impl ConnectionHandler {
                     if n == 0 {
                         if let ConnectionMode::ReplicaToMaster = self.mode {
                             println!("Connection with master closed");
-                        } else if let Some(port) = connected_replica_port {
-                            println!("Replica {} disconnected", port);
-                            self.remove_replica(port);
+                        } else if let Some(id) = connected_replica_id {
+                            println!("Replica {} disconnected", id);
+                            self.remove_replica(id);
                         } else {
                             println!("Connection closed");
                         }
@@ -208,8 +208,14 @@ impl ConnectionHandler {
                         // Replica wants to connect -> add connected replica
                         if let Some(index) = args.iter().position(|r| r == "listening-port") {
                             let port = args[index + 1].as_str();
-                            self.add_replica(port.to_owned(), tx.clone());
-                            connected_replica_port = Some(port.to_owned());
+                            // generate some replica ID
+                            let time = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs();
+                            let replica_id = time.to_string();
+                            connected_replica_id = Some(replica_id.clone());
+                            self.add_replica(replica_id, port.to_owned(), tx.clone());
                         }
                     }
 
@@ -253,8 +259,8 @@ impl ConnectionHandler {
         Ok(())
     }
 
-    pub fn add_replica(&mut self, port: String, channel: mpsc::UnboundedSender<Bytes>) {
-        let r = Replica::new(port, channel);
+    pub fn add_replica(&mut self, id: String, port: String, channel: mpsc::UnboundedSender<Bytes>) {
+        let r = Replica::new(id, port, channel);
         self.state.add_replica(r);
     }
 
@@ -323,23 +329,27 @@ impl State {
 
     pub fn add_replica(&mut self, r: Replica) {
         println!("Added replica listening on port: {}", &r.port);
-        self.replicas.insert(r.port.clone(), r);
+        self.replicas.insert(r.id.clone(), r);
     }
 
     pub fn remove_replica(&mut self, id: String) {
-        println!("Removing replica listening on port: {}", id);
-        self.replicas.remove(&id);
+        let r = self.replicas.remove(&id);
+        println!(
+            "Removing replica listening on port: {}",
+            r.expect("replica should be in the list").port
+        );
     }
 }
 
 #[derive(Debug)]
 struct Replica {
+    pub id: String,
     pub port: String,
     pub channel: mpsc::UnboundedSender<Bytes>,
 }
 
 impl Replica {
-    pub fn new(port: String, channel: mpsc::UnboundedSender<Bytes>) -> Self {
-        Self { port, channel }
+    pub fn new(id: String, port: String, channel: mpsc::UnboundedSender<Bytes>) -> Self {
+        Self { id, port, channel }
     }
 }
