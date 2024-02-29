@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::command::Command;
@@ -144,7 +145,7 @@ struct ConnectionHandler {
 enum ConnectionMode {
     /// Main connection serving clients requests
     Main,
-    /// Connection between replica and master
+    /// Connection between replica and master, initiated by replica
     ReplicaToMaster,
 }
 
@@ -165,7 +166,7 @@ impl ConnectionHandler {
 
     async fn handle_connection(&mut self) -> Result<()> {
         let mut buf = BytesMut::with_capacity(2048);
-
+        let mut connected_replica_port: Option<String> = None;
         let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
 
         loop {
@@ -177,6 +178,9 @@ impl ConnectionHandler {
                     if n == 0 {
                         if let ConnectionMode::ReplicaToMaster = self.mode {
                             println!("Connection with master closed");
+                        } else if let Some(port) = connected_replica_port {
+                            println!("Replica {} disconnected", port);
+                            self.remove_replica(port);
                         } else {
                             println!("Connection closed");
                         }
@@ -201,10 +205,11 @@ impl ConnectionHandler {
                         }
                     };
                     if let Command::Replconf(args) = &command {
-                        // Add connected replica
+                        // Replica wants to connect -> add connected replica
                         if let Some(index) = args.iter().position(|r| r == "listening-port") {
                             let port = args[index + 1].as_str();
                             self.add_replica(port.to_owned(), tx.clone());
+                            connected_replica_port = Some(port.to_owned());
                         }
                     }
 
@@ -216,19 +221,20 @@ impl ConnectionHandler {
                         }
                     };
 
-                    // Master sends writing (state changing) commands to replicas
+                    // Master sends writing (i.e. state changing) commands to replicas
                     if self.storage.is_master() && command.is_write() {
                         self.broadcast_to_replicas(command_bytes)?;
                     }
 
                     if let ConnectionMode::ReplicaToMaster = self.mode { // Connection between replica and master
+                        println!("Received command from master");
                         continue; // we do not send responses to master
                     }
                     self.stream.write_all(&response).await?;
                     self.stream.flush().await?;
                 },
                 cmd = rx.recv() => {
-                    println!("Sending command to replicas");
+                    // Sending command to connected replica
                     if let Some(cmd) = cmd {
                         self.stream.write_all(&cmd).await?;
                         self.stream.flush().await?;
@@ -250,6 +256,10 @@ impl ConnectionHandler {
     pub fn add_replica(&mut self, port: String, channel: mpsc::UnboundedSender<Bytes>) {
         let r = Replica::new(port, channel);
         self.state.add_replica(r);
+    }
+
+    pub fn remove_replica(&mut self, id: String) {
+        self.state.remove_replica(id)
     }
 
     pub fn broadcast_to_replicas(&self, command: Bytes) -> Result<()> {
@@ -275,15 +285,25 @@ impl SharedState {
             .add_replica(r);
     }
 
+    pub fn remove_replica(&self, id: String) {
+        self.state
+            .lock()
+            .expect("should be able to lock the mutex")
+            .remove_replica(id)
+    }
+
     pub fn broadcast_to_replicas(&self, command: Bytes) -> Result<()> {
-        for replica in self
+        let replicas = &self
             .state
             .lock()
             .expect("should be able to lock the mutex")
-            .replicas
-            .iter()
-        {
-            println!("broadcasting command: {:?}", &command);
+            .replicas;
+
+        if !replicas.is_empty() {
+            println!("Broadcasting command to replicas");
+        }
+
+        for replica in replicas.values() {
             replica.channel.send(command.clone())?;
         }
         Ok(())
@@ -291,19 +311,24 @@ impl SharedState {
 }
 
 struct State {
-    pub replicas: Vec<Replica>,
+    pub replicas: HashMap<String, Replica>,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
-            replicas: Vec::new(),
+            replicas: HashMap::new(),
         }
     }
 
     pub fn add_replica(&mut self, r: Replica) {
         println!("Added replica listening on port: {}", &r.port);
-        self.replicas.push(r);
+        self.replicas.insert(r.port.clone(), r);
+    }
+
+    pub fn remove_replica(&mut self, id: String) {
+        println!("Removing replica listening on port: {}", id);
+        self.replicas.remove(&id);
     }
 }
 
