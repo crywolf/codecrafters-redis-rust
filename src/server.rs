@@ -229,11 +229,12 @@ impl ConnectionHandler {
 
                     // Master sends writing (i.e. state changing) commands to replicas
                     if self.storage.is_master() && command.is_write() {
+                        dbg!("broadcast_to_replicas", &command);
                         self.broadcast_to_replicas(command_bytes)?;
                     }
 
                     if let ConnectionMode::ReplicaToMaster = self.mode { // Connection between replica and master
-                        println!("Received command from master");
+                        println!("Received command from master {:?}", &command);
                         continue; // we do not send responses to master
                     }
                     self.stream.write_all(&response).await?;
@@ -241,7 +242,9 @@ impl ConnectionHandler {
                 },
                 cmd = rx.recv() => {
                     // Sending command to connected replica
+                    println!("Sending command to connected replica {:?}", connected_replica_id);
                     if let Some(cmd) = cmd {
+                        dbg!(&cmd);
                         self.stream.write_all(&cmd).await?;
                         self.stream.flush().await?;
                     }
@@ -310,6 +313,7 @@ impl SharedState {
         }
 
         for replica in replicas.values() {
+            println!("Broadcasting to replica {}", replica.id);
             replica.channel.send(command.clone())?;
         }
         Ok(())
