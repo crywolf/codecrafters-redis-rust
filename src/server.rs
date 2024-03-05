@@ -325,7 +325,7 @@ impl SharedState {
 }
 
 struct State {
-    pub replicas: HashMap<String, Replica>,
+    replicas: HashMap<String, Replica>,
 }
 
 impl State {
