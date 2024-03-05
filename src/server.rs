@@ -208,14 +208,8 @@ impl ConnectionHandler {
                             // Replica wants to connect -> add connected replica
                             if let Some(index) = args.iter().position(|r| r == "listening-port") {
                                 let port = args[index + 1].as_str();
-                                // generate some replica ID
-                                let time = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs();
-                                let replica_id = time.to_string();
-                                connected_replica_id = Some(replica_id.clone());
-                                self.add_replica(replica_id, port.to_owned(), tx.clone());
+                                let replica_id = self.add_replica(port.to_owned(), tx.clone());
+                                connected_replica_id = Some(replica_id)
                             }
                         }
 
@@ -262,9 +256,11 @@ impl ConnectionHandler {
         Ok(())
     }
 
-    pub fn add_replica(&mut self, id: String, port: String, channel: mpsc::UnboundedSender<Bytes>) {
-        let r = Replica::new(id, port, channel);
+    pub fn add_replica(&mut self, port: String, channel: mpsc::UnboundedSender<Bytes>) -> String {
+        let id = (self.state.replicas_count() + 1).to_string();
+        let r = Replica::new(id.clone(), port, channel);
         self.state.add_replica(r);
+        id
     }
 
     pub fn remove_replica(&mut self, id: String) {
@@ -285,6 +281,14 @@ impl SharedState {
         Self {
             state: Mutex::new(State::new()),
         }
+    }
+
+    pub fn replicas_count(&self) -> usize {
+        self.state
+            .lock()
+            .expect("should be able to lock the mutex")
+            .replicas
+            .len()
     }
 
     pub fn add_replica(&self, r: Replica) {
@@ -308,6 +312,10 @@ impl SharedState {
             .expect("should be able to lock the mutex")
             .replicas;
 
+        if !replicas.is_empty() {
+            println!("Broadcasting command to {} replicas", replicas.len());
+        }
+
         for replica in replicas.values() {
             println!("Broadcasting to replica {}", replica.id);
             replica.channel.send(command.clone())?;
@@ -328,7 +336,7 @@ impl State {
     }
 
     pub fn add_replica(&mut self, r: Replica) {
-        println!("Added replica listening on port: {}", &r.port);
+        println!("Added replica {} listening on port: {}", &r.id, &r.port);
         self.replicas.insert(r.id.clone(), r);
     }
 
