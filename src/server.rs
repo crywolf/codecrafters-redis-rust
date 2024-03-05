@@ -187,64 +187,64 @@ impl ConnectionHandler {
                         break;
                     }
 
-                    let command_bytes = Bytes::copy_from_slice(&buf);
+                    while !buf.is_empty() {
+                        let t = match RESPType::parse(&mut buf).context("parsing RESP type") {
+                            Ok(t) => t,
+                            Err(err) => {
+                                self.handle_error(err).await?;
+                                continue;
+                            }
+                        };
 
-                    let t = match RESPType::parse(&mut buf.split_to(n)).context("parsing RESP type") {
-                        Ok(t) => t,
-                        Err(err) => {
-                            self.handle_error(err).await?;
-                            continue;
-                        }
-                    };
+                        let command = match Command::parse(t).context("parsing command") {
+                            Ok(c) => c,
+                            Err(err) => {
+                                self.handle_error(err).await?;
+                                continue;
+                            }
+                        };
 
-                    let command = match Command::parse(t).context("parsing command") {
-                        Ok(c) => c,
-                        Err(err) => {
-                            self.handle_error(err).await?;
-                            continue;
+                        if let Command::Replconf(args) = &command {
+                            // Replica wants to connect -> add connected replica
+                            if let Some(index) = args.iter().position(|r| r == "listening-port") {
+                                let port = args[index + 1].as_str();
+                                // generate some replica ID
+                                let time = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs();
+                                let replica_id = time.to_string();
+                                connected_replica_id = Some(replica_id.clone());
+                                self.add_replica(replica_id, port.to_owned(), tx.clone());
+                            }
                         }
-                    };
-                    if let Command::Replconf(args) = &command {
-                        // Replica wants to connect -> add connected replica
-                        if let Some(index) = args.iter().position(|r| r == "listening-port") {
-                            let port = args[index + 1].as_str();
-                            // generate some replica ID
-                            let time = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs();
-                            let replica_id = time.to_string();
-                            connected_replica_id = Some(replica_id.clone());
-                            self.add_replica(replica_id, port.to_owned(), tx.clone());
+
+                        let response = match command.response(Arc::clone(&self.storage)) {
+                            Ok(r) => r,
+                            Err(err) => {
+                                self.handle_error(err).await?;
+                                continue;
+                            }
+                        };
+
+                        // Master sends writing (i.e. state changing) commands to replicas
+                        if self.storage.is_master() && command.is_write() {
+                            println!("Broadcasting command {:?} to replicas (if any)", command);
+                            self.broadcast_to_replicas(Bytes::from(command.clone().into_bytes()))?;
                         }
+
+                        if let ConnectionMode::ReplicaToMaster = self.mode { // Connection between replica and master
+                            println!("Received command from master {:?}", &command);
+                            continue; // we do not send responses to master
+                        }
+                        self.stream.write_all(&response).await?;
+                        self.stream.flush().await?;
                     }
-
-                    let response = match command.response(Arc::clone(&self.storage)) {
-                        Ok(r) => r,
-                        Err(err) => {
-                            self.handle_error(err).await?;
-                            continue;
-                        }
-                    };
-
-                    // Master sends writing (i.e. state changing) commands to replicas
-                    if self.storage.is_master() && command.is_write() {
-                        dbg!("broadcast_to_replicas", &command);
-                        self.broadcast_to_replicas(command_bytes)?;
-                    }
-
-                    if let ConnectionMode::ReplicaToMaster = self.mode { // Connection between replica and master
-                        println!("Received command from master {:?}", &command);
-                        continue; // we do not send responses to master
-                    }
-                    self.stream.write_all(&response).await?;
-                    self.stream.flush().await?;
                 },
+
                 cmd = rx.recv() => {
                     // Sending command to connected replica
-                    println!("Sending command to connected replica {:?}", connected_replica_id);
                     if let Some(cmd) = cmd {
-                        dbg!(&cmd);
                         self.stream.write_all(&cmd).await?;
                         self.stream.flush().await?;
                     }
@@ -307,10 +307,6 @@ impl SharedState {
             .lock()
             .expect("should be able to lock the mutex")
             .replicas;
-
-        if !replicas.is_empty() {
-            println!("Broadcasting command to replicas");
-        }
 
         for replica in replicas.values() {
             println!("Broadcasting to replica {}", replica.id);

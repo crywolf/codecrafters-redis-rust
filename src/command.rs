@@ -147,6 +147,34 @@ impl Command {
         };
         Ok(arg)
     }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        match self {
+            Self::Set(key, value, expiry) => {
+                if expiry != "0" {
+                    return format!(
+                        "*5\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n{}\r\n$2\r\nPX\r\n${}\r\n{}\r\n",
+                        key.len(),
+                        key,
+                        value.len(),
+                        value,
+                        expiry.len(),
+                        expiry
+                    )
+                    .into_bytes();
+                }
+                format!(
+                    "*3\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                    key.len(),
+                    key,
+                    value.len(),
+                    value,
+                )
+                .into_bytes()
+            }
+            _ => unimplemented!(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -164,7 +192,6 @@ mod tests {
         let out = RESPType::parse(&mut buf);
         assert!(out.is_ok());
         let resp = out.unwrap();
-
         let r = Command::parse(resp);
         assert!(r.is_ok());
         let command = r.unwrap();
@@ -262,7 +289,6 @@ mod tests {
         let r = command.response(storage);
         assert!(r.is_ok());
         let response = r.unwrap();
-        dbg!(&response);
         assert!(response.starts_with(&Bytes::from_static(
             b"+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n$88\r\nREDIS0011"
         )),);
@@ -371,5 +397,36 @@ mod tests {
         assert!(r.is_ok());
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$-1\r\n"));
+    }
+
+    #[test]
+    fn test_commands_pipelining() {
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config));
+
+        let mut responses = vec![];
+
+        // multiple commands in one go (pipelining)
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice("*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n*3\r\n$3\r\nSET\r\n$3\r\nbar\r\n$3\r\n456\r\n*3\r\n$3\r\nSET\r\n$3\r\nbaz\r\n$3\r\n789\r\n".as_bytes());
+
+        while !buf.is_empty() {
+            let out = RESPType::parse(&mut buf);
+            assert!(out.is_ok());
+            let resp = out.unwrap();
+
+            let r = Command::parse(resp);
+            assert!(r.is_ok());
+            let command = r.unwrap();
+
+            let r = command.response(Arc::clone(&storage));
+            assert!(r.is_ok());
+            let response = r.unwrap();
+            assert_eq!(response, Bytes::from_static(b"+OK\r\n"));
+
+            responses.push(response);
+        }
+
+        assert_eq!(responses.len(), 3);
     }
 }

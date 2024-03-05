@@ -1,16 +1,16 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Context, Ok, Result};
 use bytes::{Buf, BytesMut};
 
 const CRLF: &[u8; 2] = b"\r\n";
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RESPType {
     String(String),
     Array(Vec<RESPType>),
     Bulk(BulkString),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BulkString {
     pub len: usize,
     pub data: String,
@@ -112,8 +112,10 @@ mod tests {
         let out = RESPType::parse(&mut buf);
         assert!(out.is_ok());
         let out = out.unwrap();
-        assert!(
-            out == RESPType::Array(vec![
+
+        assert_eq!(
+            out,
+            RESPType::Array(vec![
                 RESPType::String("ONE".to_string()),
                 RESPType::String("TWO".to_string())
             ])
@@ -151,6 +153,76 @@ mod tests {
                 RESPType::Bulk(BulkString {
                     len: 3,
                     data: "hey".to_string()
+                })
+            ])
+        );
+    }
+
+    #[test]
+    fn test_parse_array_of_arrays_bulk_strings() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice("*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n*3\r\n$3\r\nSET\r\n$3\r\nbar\r\n$3\r\n456\r\n*3\r\n$3\r\nSET\r\n$3\r\nbaz\r\n$3\r\n789\r\n".as_bytes());
+
+        let mut resps = vec![];
+
+        while !buf.is_empty() {
+            let out = RESPType::parse(&mut buf);
+            assert!(out.is_ok());
+            let resp = out.unwrap();
+            resps.push(resp);
+        }
+
+        assert_eq!(resps.len(), 3);
+        assert_eq!(
+            resps[0],
+            RESPType::Array(vec![
+                RESPType::Bulk(BulkString {
+                    len: 3,
+                    data: "SET".to_string()
+                }),
+                RESPType::Bulk(BulkString {
+                    len: 3,
+                    data: "foo".to_string()
+                }),
+                RESPType::Bulk(BulkString {
+                    len: 3,
+                    data: "123".to_string()
+                })
+            ])
+        );
+
+        assert_eq!(
+            resps[1],
+            RESPType::Array(vec![
+                RESPType::Bulk(BulkString {
+                    len: 3,
+                    data: "SET".to_string()
+                }),
+                RESPType::Bulk(BulkString {
+                    len: 3,
+                    data: "bar".to_string()
+                }),
+                RESPType::Bulk(BulkString {
+                    len: 3,
+                    data: "456".to_string()
+                })
+            ])
+        );
+
+        assert_eq!(
+            resps[2],
+            RESPType::Array(vec![
+                RESPType::Bulk(BulkString {
+                    len: 3,
+                    data: "SET".to_string()
+                }),
+                RESPType::Bulk(BulkString {
+                    len: 3,
+                    data: "baz".to_string()
+                }),
+                RESPType::Bulk(BulkString {
+                    len: 3,
+                    data: "789".to_string()
                 })
             ])
         );
