@@ -114,8 +114,20 @@ impl Command {
                 Bytes::from(val)
             }
             Self::Replconf(args) => {
-                println!("Recieved handhake from replica: REPLCONF {:?}", args);
-                Bytes::from("+OK\r\n")
+                if args.len() == 2 && args[0].to_lowercase() == "getack" && args[1] == "*" {
+                    println!("Recieved command: REPLCONF {:?}", args);
+                    // TODO: get real number of bytes
+                    let sent = "0".to_string();
+                    println!("Responding with: REPLCONF ACK {}", sent);
+                    Bytes::from(format!(
+                        "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${}\r\n{}\r\n",
+                        sent.len(),
+                        sent,
+                    ))
+                } else {
+                    println!("Recieved handhake from replica: REPLCONF {:?}", args);
+                    Bytes::from("+OK\r\n")
+                }
             }
             Self::Psync(arg1, arg2) => {
                 println!("Recieved handhake from replica: PSYNC {arg1} {arg2}");

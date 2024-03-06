@@ -121,6 +121,9 @@ impl Server {
         stream.flush().await?;
 
         buf.clear();
+
+        let mut buf = BytesMut::with_capacity(149); // Reader buffer for reading FULLSYNC with RBD file
+
         stream.read_buf(&mut buf).await?;
         if !buf.starts_with(b"+FULLRESYNC") {
             return Err(std::io::Error::new(
@@ -142,6 +145,7 @@ struct ConnectionHandler {
     mode: ConnectionMode,
 }
 
+#[derive(Debug)]
 enum ConnectionMode {
     /// Main connection serving clients requests
     Main,
@@ -187,6 +191,10 @@ impl ConnectionHandler {
                         break;
                     }
 
+                    println!("Listening as {:?}", self.mode);
+                    // TODO - remove dbg
+                    dbg!(&buf);
+
                     while !buf.is_empty() {
                         let t = match RESPType::parse(&mut buf).context("parsing RESP type") {
                             Ok(t) => t,
@@ -210,6 +218,9 @@ impl ConnectionHandler {
                                 let port = args[index + 1].as_str();
                                 let replica_id = self.add_replica(port.to_owned(), tx.clone());
                                 connected_replica_id = Some(replica_id)
+                            } else if let Some(index) = args.iter().position(|r| r.to_lowercase() == "getack") {
+                                let what = args[index + 1].as_str();
+                                println!("Received command (from master) REPLCONF GETACK {}", what);
                             }
                         }
 
@@ -228,9 +239,19 @@ impl ConnectionHandler {
                         }
 
                         if let ConnectionMode::ReplicaToMaster = self.mode { // Connection between replica and master
-                            println!("Received command from master {:?}", &command);
-                            continue; // we do not send responses to master
+                            println!("Received command from master {:?}", command);
+                            // send response only to 'REPLCONF GETACK *' command
+                            match command {
+                                Command::Replconf(args) => {
+                                    if args.len() != 2 || args[0].to_lowercase() != "getack" || args[1] != "*" {
+                                        continue;
+                                    }
+                                } // send response to REPLCONF GETACK *
+                                _ => { continue; } // do not send responses to master for all other commands
+                            }
                         }
+
+                        // Sending response
                         self.stream.write_all(&response).await?;
                         self.stream.flush().await?;
                     }
