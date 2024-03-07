@@ -14,6 +14,11 @@ pub enum Command {
     Get(String),
     Replconf(Vec<String>),
     Psync(String, String),
+    //Wait(String, String),
+    Wait {
+        args: (String, String),
+        replicas_count: usize,
+    },
 }
 
 impl Command {
@@ -85,6 +90,14 @@ impl Command {
                 let arg2 = Self::get_arg(&mut parts)?;
                 Self::Psync(arg1.data, arg2.data)
             }
+            "WAIT" => {
+                let arg1 = Self::get_arg(&mut parts)?;
+                let arg2 = Self::get_arg(&mut parts)?;
+                Self::Wait {
+                    args: (arg1.data, arg2.data),
+                    replicas_count: 0,
+                }
+            }
             _ => unimplemented!(),
         };
 
@@ -146,6 +159,13 @@ impl Command {
                 } else {
                     Bytes::from("$-1\r\n")
                 }
+            }
+            Self::Wait {
+                args: (num_replicas, timeout),
+                replicas_count,
+            } => {
+                dbg!(num_replicas, timeout);
+                Bytes::from(format!(":{}\r\n", replicas_count))
             }
         };
         Ok(response)
