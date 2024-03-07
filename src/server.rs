@@ -214,12 +214,6 @@ impl ConnectionHandler {
                             }
                         };
 
-                        if let ConnectionMode::ReplicaToMaster = self.mode {
-                            // Replica stores how many bytes received from the master
-                            let bytes_processed = bytes_read - buf.len();
-                            self.storage.add_processed_bytes(bytes_processed);
-                        }
-
                         if let Command::Replconf(args) = &command {
                             // Replica wants to connect -> add connected replica
                             if let Some(index) = args.iter().position(|r| r == "listening-port") {
@@ -248,7 +242,12 @@ impl ConnectionHandler {
 
                         if let ConnectionMode::ReplicaToMaster = self.mode { // Connection between replica and master
                             println!("Received command from master {:?}", command);
-                            // send response only to 'REPLCONF GETACK *' command
+
+                            // Replica stores how many bytes received from the master
+                            let bytes_processed = bytes_read - buf.len();
+                            self.storage.add_processed_bytes(bytes_processed);
+
+                            // Send response only to 'REPLCONF GETACK *' command
                             match command {
                                 Command::Replconf(args) => {
                                     if args.len() != 2 || args[0].to_lowercase() != "getack" || args[1] != "*" {
