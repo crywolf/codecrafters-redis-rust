@@ -207,7 +207,7 @@ impl ConnectionHandler {
                             }
                         };
 
-                        let command = match Command::parse(t).context("parsing command") {
+                        let mut command = match Command::parse(t).context("parsing command") {
                             Ok(c) => c,
                             Err(err) => {
                                 self.handle_error(err).await?;
@@ -225,6 +225,10 @@ impl ConnectionHandler {
                                 let what = args[index + 1].as_str();
                                 println!("Received command (from master) REPLCONF GETACK {}", what);
                             }
+                        }
+
+                        if let Command::Wait{args, ..} = command {
+                            command = Command::Wait{args, replicas_count: self.state.replicas_count() };
                         }
 
                         let response = match command.response(Arc::clone(&self.storage)) {
