@@ -29,8 +29,6 @@ impl Server {
     }
 
     pub async fn run(&mut self) -> std::io::Result<()> {
-        let addr = self.config.get_address();
-
         if self.config.is_replica() {
             let master_conn = self.connect_to_master().await?;
             let storage = Arc::clone(&self.storage);
@@ -49,6 +47,10 @@ impl Server {
             });
         }
 
+        // Ensure that replica to master connection loop starts first (before main connection loop)
+        tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
+
+        let addr = self.config.get_address();
         let listener = TcpListener::bind(&addr).await?;
         println!("Server is running on address: {addr}");
 
