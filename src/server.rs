@@ -48,7 +48,7 @@ impl Server {
         }
 
         // Ensure that replica to master connection loop starts first (before main connection loop)
-        tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
 
         let addr = self.config.get_address();
         let listener = TcpListener::bind(&addr).await?;
