@@ -115,14 +115,12 @@ impl Command {
             }
             Self::Replconf(args) => {
                 if args.len() == 2 && args[0].to_lowercase() == "getack" && args[1] == "*" {
-                    println!("Recieved command: REPLCONF {:?}", args);
-                    // TODO: get real number of bytes
-                    let sent = "0".to_string();
-                    println!("Responding with: REPLCONF ACK {}", sent);
+                    let processed_bytes = storage.get_processed_bytes().to_string();
+                    println!("Responding with: REPLCONF ACK {}", processed_bytes);
                     Bytes::from(format!(
                         "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${}\r\n{}\r\n",
-                        sent.len(),
-                        sent,
+                        processed_bytes.len(),
+                        processed_bytes,
                     ))
                 } else {
                     println!("Recieved handhake from replica: REPLCONF {:?}", args);

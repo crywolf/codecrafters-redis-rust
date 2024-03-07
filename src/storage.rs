@@ -11,6 +11,7 @@ use crate::config::Config;
 pub struct Storage {
     data: Mutex<HashMap<String, Item>>,
     config: Arc<Config>,
+    processed_bytes: Mutex<usize>,
 }
 
 impl Storage {
@@ -18,6 +19,7 @@ impl Storage {
         Self {
             data: Mutex::new(HashMap::new()),
             config,
+            processed_bytes: Mutex::new(0),
         }
     }
 
@@ -94,6 +96,20 @@ impl Storage {
 
     pub fn is_master(&self) -> bool {
         !self.config.is_replica()
+    }
+
+    pub fn add_processed_bytes(&self, count: usize) {
+        *self
+            .processed_bytes
+            .lock()
+            .expect("shoul be able to lock the mutex") += count;
+    }
+
+    pub fn get_processed_bytes(&self) -> usize {
+        *self
+            .processed_bytes
+            .lock()
+            .expect("shoul be able to lock the mutex")
     }
 
     fn hex_to_bytes(s: &str) -> Vec<u8> {

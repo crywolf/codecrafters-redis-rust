@@ -192,15 +192,15 @@ impl ConnectionHandler {
                     }
 
                     println!("Listening as {:?}", self.mode);
-                    // TODO - remove dbg
-                    dbg!(&buf);
 
                     while !buf.is_empty() {
+                        let bytes_read = buf.len();
+
                         let t = match RESPType::parse(&mut buf).context("parsing RESP type") {
                             Ok(t) => t,
                             Err(err) => {
                                 self.handle_error(err).await?;
-                                continue;
+                                break;
                             }
                         };
 
@@ -208,9 +208,15 @@ impl ConnectionHandler {
                             Ok(c) => c,
                             Err(err) => {
                                 self.handle_error(err).await?;
-                                continue;
+                                break;
                             }
                         };
+
+                        if let ConnectionMode::ReplicaToMaster = self.mode {
+                            // Replica stores how many bytes received from the master
+                            let bytes_processed = bytes_read - buf.len();
+                            self.storage.add_processed_bytes(bytes_processed);
+                        }
 
                         if let Command::Replconf(args) = &command {
                             // Replica wants to connect -> add connected replica
@@ -245,8 +251,8 @@ impl ConnectionHandler {
                                 Command::Replconf(args) => {
                                     if args.len() != 2 || args[0].to_lowercase() != "getack" || args[1] != "*" {
                                         continue;
-                                    }
-                                } // send response to REPLCONF GETACK *
+                                    } // send response to REPLCONF GETACK *
+                                }
                                 _ => { continue; } // do not send responses to master for all other commands
                             }
                         }
