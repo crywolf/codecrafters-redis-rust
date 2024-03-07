@@ -106,11 +106,10 @@ impl Storage {
     }
 
     pub fn get_processed_bytes(&self) -> usize {
-        0
-        // *self
-        //     .processed_bytes
-        //     .lock()
-        //     .expect("shoul be able to lock the mutex")
+        *self
+            .processed_bytes
+            .lock()
+            .expect("shoul be able to lock the mutex")
     }
 
     fn hex_to_bytes(s: &str) -> Vec<u8> {
