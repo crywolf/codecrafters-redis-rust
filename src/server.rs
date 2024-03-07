@@ -48,7 +48,7 @@ impl Server {
         }
 
         // Ensure that replica to master connection loop starts first (before main connection loop)
-        tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
         let addr = self.config.get_address();
         let listener = TcpListener::bind(&addr).await?;
@@ -135,7 +135,7 @@ impl Server {
         }
 
         println!("Server is running as a replica of '{}'", &master_addr);
-
+        dbg!(buf);
         Ok(stream)
     }
 }
@@ -196,6 +196,7 @@ impl ConnectionHandler {
                     println!("Listening as {:?}", self.mode);
 
                     while !buf.is_empty() {
+                        dbg!(&buf);
                         let bytes_read = buf.len();
 
                         let t = match RESPType::parse(&mut buf).context("parsing RESP type") {
