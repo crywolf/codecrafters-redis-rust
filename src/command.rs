@@ -14,7 +14,6 @@ pub enum Command {
     Get(String),
     Replconf(Vec<String>),
     Psync(String, String),
-    //Wait(String, String),
     Wait {
         args: (String, String),
         replicas_count: usize,
@@ -127,9 +126,17 @@ impl Command {
                 Bytes::from(val)
             }
             Self::Replconf(args) => {
-                if args.len() == 2 && args[0].to_lowercase() == "getack" && args[1] == "*" {
-                    let processed_bytes = storage.get_processed_bytes().to_string();
+                if args.len() == 2 && args[0].to_uppercase() == "GETACK" {
+                    let mut processed_bytes = "0".to_owned();
+                    if args[1] == "*" {
+                        processed_bytes = storage.get_processed_bytes().to_string();
+                    }
+                    if args[1] == "WRITE" {
+                        processed_bytes = storage.get_processed_write_command_bytes().to_string();
+                    }
+
                     println!("Responding with: REPLCONF ACK {}", processed_bytes);
+                    storage.reset_processed_write_command_bytes();
                     Bytes::from(format!(
                         "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${}\r\n{}\r\n",
                         processed_bytes.len(),
@@ -161,12 +168,9 @@ impl Command {
                 }
             }
             Self::Wait {
-                args: (num_replicas, timeout),
+                args: _,
                 replicas_count,
-            } => {
-                dbg!(num_replicas, timeout);
-                Bytes::from(format!(":{}\r\n", replicas_count))
-            }
+            } => Bytes::from(format!(":{}\r\n", replicas_count)),
         };
         Ok(response)
     }

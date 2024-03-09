@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::command::Command;
 use crate::resp::RESPType;
@@ -147,7 +148,7 @@ struct ConnectionHandler {
     mode: ConnectionMode,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum ConnectionMode {
     /// Main connection serving clients requests
     Main,
@@ -184,7 +185,7 @@ impl ConnectionHandler {
                     if n == 0 {
                         if let ConnectionMode::ReplicaToMaster = self.mode {
                             println!("Connection with master closed");
-                        } else if let Some(id) = connected_replica_id {
+                        } else if let Some(id) = connected_replica_id.clone() {
                             println!("Replica {} disconnected", id);
                             self.remove_replica(id);
                         } else {
@@ -196,7 +197,7 @@ impl ConnectionHandler {
                     println!("Listening as {:?}", self.mode);
 
                     while !buf.is_empty() {
-                        dbg!(&buf);
+                        //dbg!(&buf);
                         let bytes_read = buf.len();
 
                         let t = match RESPType::parse(&mut buf).context("parsing RESP type") {
@@ -221,14 +222,59 @@ impl ConnectionHandler {
                                 let port = args[index + 1].as_str();
                                 let replica_id = self.add_replica(port.to_owned(), tx.clone());
                                 connected_replica_id = Some(replica_id)
-                            } else if let Some(index) = args.iter().position(|r| r.to_lowercase() == "getack") {
+                            } else if let Some(index) = args.iter().position(|r| r.to_uppercase() == "GETACK") {
                                 let what = args[index + 1].as_str();
                                 println!("Received command (from master) REPLCONF GETACK {}", what);
+                            } else if let Some(index) = args.iter().position(|r| r.to_uppercase() == "ACK") {
+                                let ack_bytes = args[index + 1].parse::<usize>()?;
+                                println!("Received command REPLCONF ACK {}", ack_bytes);
+
+                                if ack_bytes == self.state.get_sent_write_command_bytes() {
+                                    self.state.incr_synced_replicas();
+                                }
+                                println!("Synced replicas currently {}", self.state.synced_replicas());
+
+                                // Do not send response to REPLCONF ACK command because IT IS actually a response to previous command REPLCONF GETACK
+                                continue;
                             }
                         }
 
                         if let Command::Wait{args, ..} = command {
-                            command = Command::Wait{args, replicas_count: self.state.replicas_count() };
+
+                            command = Command::Wait{args: args.clone(), replicas_count: self.state.replicas_count() };
+
+                            if self.storage.is_master() && self.state.get_sent_write_command_bytes() > 0 {
+                                let (num_replicas, timeout) = args.clone();
+                                let expected_replicas = num_replicas.parse::<usize>()?;
+
+                                println!("> WAIT command - expected replicas: {}, timeout: {}", expected_replicas, timeout);
+
+                                self.state.reset_synced_replicas();
+
+                                let timeout = Duration::from_millis(timeout.parse::<u64>()?);
+                                let start = Instant::now();
+
+                                println!("Asking replicas to acknowledge accepted write commands");
+                                self.broadcast_to_replicas(Bytes::from("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$5\r\nWRITE\r\n"))?;
+
+                                loop {
+                                    tokio::task::yield_now().await;
+
+                                    let synced_replicas = self.state.synced_replicas();
+
+                                    command = Command::Wait{args: args.clone(), replicas_count: synced_replicas };
+
+                                    if synced_replicas >= expected_replicas {
+                                        break;
+                                    }
+                                    if start.elapsed() > timeout {
+                                        println!("> WAIT command - timouted");
+                                        break;
+                                    }
+                                }
+
+                                self.state.reset_sent_write_command_bytes();
+                            }
                         }
 
                         let response = match command.response(Arc::clone(&self.storage)) {
@@ -239,25 +285,34 @@ impl ConnectionHandler {
                             }
                         };
 
-                        // Master sends writing (i.e. state changing) commands to replicas
+                        // Master sends write (i.e. state changing) commands to replicas
                         if self.storage.is_master() && command.is_write() {
                             println!("Broadcasting command {:?} to replicas (if any)", command);
-                            self.broadcast_to_replicas(Bytes::from(command.clone().into_bytes()))?;
+                            let command_bytes = command.clone().into_bytes();
+                            let command_bytes_len = command_bytes.len();
+                            self.broadcast_to_replicas(Bytes::from(command_bytes))?;
+
+                            // Store the count of all sent write commands
+                            self.state.add_sent_write_command_bytes(command_bytes_len);
                         }
 
                         if let ConnectionMode::ReplicaToMaster = self.mode { // Connection between replica and master
                             println!("Received command from master {:?}", command);
 
-                            // Replica stores how many bytes received from the master
+                            // Replica stores how many bytes received from master
                             let bytes_processed = bytes_read - buf.len();
                             self.storage.add_processed_bytes(bytes_processed);
+
+                            if command.is_write() {
+                                self.storage.add_processed_write_command_bytes(bytes_processed);
+                            }
 
                             // Send response only to 'REPLCONF GETACK *' command
                             match command {
                                 Command::Replconf(args) => {
-                                    if args.len() != 2 || args[0].to_lowercase() != "getack" || args[1] != "*" {
+                                    if args.len() != 2 || args[0].to_uppercase() != "GETACK" {
                                         continue;
-                                    } // send response to REPLCONF GETACK *
+                                    } // send response to REPLCONF GETACK
                                 }
                                 _ => { continue; } // do not send responses to master for all other commands
                             }
@@ -355,16 +410,63 @@ impl SharedState {
         }
         Ok(())
     }
+
+    pub fn add_sent_write_command_bytes(&self, count: usize) {
+        self.state
+            .lock()
+            .expect("shoul be able to lock the mutex")
+            .add_sent_write_command_bytes(count)
+    }
+
+    pub fn get_sent_write_command_bytes(&self) -> usize {
+        self.state
+            .lock()
+            .expect("shoul be able to lock the mutex")
+            .get_sent_write_command_bytes()
+    }
+
+    pub fn reset_sent_write_command_bytes(&self) {
+        self.state
+            .lock()
+            .expect("shoul be able to lock the mutex")
+            .reset_sent_write_command_bytes();
+    }
+
+    pub fn synced_replicas(&self) -> usize {
+        self.state
+            .lock()
+            .expect("should be able to lock the mutex")
+            .synced_replicas
+    }
+
+    pub fn incr_synced_replicas(&self) {
+        self.state
+            .lock()
+            .expect("should be able to lock the mutex")
+            .synced_replicas += 1;
+    }
+
+    pub fn reset_synced_replicas(&self) {
+        self.state
+            .lock()
+            .expect("should be able to lock the mutex")
+            .synced_replicas = 0;
+    }
 }
 
 struct State {
     replicas: HashMap<String, Replica>,
+    synced_replicas: usize,
+    /// Number of bytes of write commands sent by master
+    sent_write_command_bytes: usize,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
             replicas: HashMap::new(),
+            synced_replicas: 0,
+            sent_write_command_bytes: 0,
         }
     }
 
@@ -379,6 +481,18 @@ impl State {
             "Removing replica listening on port: {}",
             r.expect("replica should be in the list").port
         );
+    }
+
+    pub fn add_sent_write_command_bytes(&mut self, count: usize) {
+        self.sent_write_command_bytes += count;
+    }
+
+    pub fn get_sent_write_command_bytes(&self) -> usize {
+        self.sent_write_command_bytes
+    }
+
+    pub fn reset_sent_write_command_bytes(&mut self) {
+        self.sent_write_command_bytes = 0;
     }
 }
 
