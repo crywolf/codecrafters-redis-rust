@@ -197,7 +197,7 @@ impl ConnectionHandler {
                     println!("Listening as {:?}", self.mode);
 
                     while !buf.is_empty() {
-                        //dbg!(&buf);
+                        dbg!(&buf);
                         let bytes_read = buf.len();
 
                         let t = match RESPType::parse(&mut buf).context("parsing RESP type") {
@@ -227,9 +227,8 @@ impl ConnectionHandler {
                                 println!("Received command (from master) REPLCONF GETACK {}", what);
                             } else if let Some(index) = args.iter().position(|r| r.to_uppercase() == "ACK") {
                                 let ack_bytes = args[index + 1].parse::<usize>()?;
-                                println!("Received command REPLCONF ACK {}", ack_bytes);
 
-                                if ack_bytes == self.state.get_sent_write_command_bytes() {
+                                if ack_bytes >= self.state.get_sent_write_command_bytes() {
                                     self.state.incr_synced_replicas();
                                 }
                                 println!("Synced replicas currently {}", self.state.synced_replicas());
@@ -240,7 +239,6 @@ impl ConnectionHandler {
                         }
 
                         if let Command::Wait{args, ..} = command {
-
                             command = Command::Wait{args: args.clone(), replicas_count: self.state.replicas_count() };
 
                             if self.storage.is_master() && self.state.get_sent_write_command_bytes() > 0 {
@@ -258,19 +256,20 @@ impl ConnectionHandler {
                                 self.broadcast_to_replicas(Bytes::from("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$5\r\nWRITE\r\n"))?;
 
                                 loop {
-                                    tokio::task::yield_now().await;
-
                                     let synced_replicas = self.state.synced_replicas();
 
                                     command = Command::Wait{args: args.clone(), replicas_count: synced_replicas };
 
                                     if synced_replicas >= expected_replicas {
+                                        println!("> WAIT command - OK: {:?}", start.elapsed());
                                         break;
                                     }
                                     if start.elapsed() > timeout {
-                                        println!("> WAIT command - timouted");
+                                        println!("> WAIT command - timouted: {:?}", start.elapsed());
                                         break;
                                     }
+
+                                    tokio::task::yield_now().await;
                                 }
 
                                 self.state.reset_sent_write_command_bytes();
