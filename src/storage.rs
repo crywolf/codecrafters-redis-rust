@@ -15,8 +15,6 @@ pub struct Storage {
     processed_bytes: Mutex<usize>,
     /// Number of bytes of write commands processed by this replica
     processed_write_commands_bytes: Mutex<usize>,
-    // Number of bytes of write commands sent by master
-    //    sent_write_command_bytes: Mutex<usize>,
 }
 
 impl Storage {
@@ -26,7 +24,6 @@ impl Storage {
             config,
             processed_bytes: Mutex::new(0),
             processed_write_commands_bytes: Mutex::new(0),
-            //  sent_write_command_bytes: Mutex::new(0),
         }
     }
 
@@ -92,9 +89,9 @@ impl Storage {
         }
     }
 
-    pub fn get_rbd_file(&self) -> Bytes {
-        let rbd_hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
-        Bytes::from(Self::hex_to_bytes(rbd_hex))
+    pub fn get_rdb_file(&self) -> Bytes {
+        let rdb_hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+        Bytes::from(Self::hex_to_bytes(rdb_hex))
     }
 
     pub fn is_replica(&self) -> bool {
@@ -140,27 +137,6 @@ impl Storage {
             .expect("shoul be able to lock the mutex") = 0;
     }
 
-    /*    pub fn add_sent_write_command_bytes(&self, count: usize) {
-           *self
-               .sent_write_command_bytes
-               .lock()
-               .expect("shoul be able to lock the mutex") += count;
-       }
-
-       pub fn get_sent_write_command_bytes(&self) -> usize {
-           *self
-               .sent_write_command_bytes
-               .lock()
-               .expect("shoul be able to lock the mutex")
-       }
-
-       pub fn reset_sent_write_command_bytes(&self) {
-           *self
-               .sent_write_command_bytes
-               .lock()
-               .expect("shoul be able to lock the mutex") = 0;
-       }
-    */
     fn hex_to_bytes(s: &str) -> Vec<u8> {
         (0..s.len())
             .step_by(2)

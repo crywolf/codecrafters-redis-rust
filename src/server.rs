@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use tokio::sync::mpsc;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
 
@@ -60,7 +60,12 @@ impl Server {
             println!("New connection from {}", addr);
             let storage = Arc::clone(&self.storage);
             let state = Arc::clone(&self.state);
-            let mut handler = ConnectionHandler::new(stream, ConnectionMode::Main, storage, state);
+            let mut handler = ConnectionHandler::new(
+                BufReader::new(stream),
+                ConnectionMode::Main,
+                storage,
+                state,
+            );
             tokio::spawn(async move {
                 handler
                     .handle_connection()
@@ -71,7 +76,7 @@ impl Server {
     }
 
     /// Replica server connects to master server
-    async fn connect_to_master(&mut self) -> std::io::Result<TcpStream> {
+    async fn connect_to_master(&mut self) -> std::io::Result<BufReader<TcpStream>> {
         // Handshake with master
         let mut buf = BytesMut::with_capacity(2048); // Reader buffer
 
@@ -81,9 +86,9 @@ impl Server {
             .expect("master address is set");
         println!("Connecting to master server '{}'", &master_addr);
 
-        let mut stream = TcpStream::connect(&master_addr).await?;
+        let mut stream = BufReader::new(TcpStream::connect(&master_addr).await?);
 
-        // 1. PING
+        // 1. send PING
         let ping = b"*1\r\n$4\r\nPING\r\n";
         stream.write_all(ping).await?;
         stream.flush().await?;
@@ -95,7 +100,7 @@ impl Server {
         master_response.put_slice(b"+PONG\r\n");
         assert_eq!(buf, master_response);
 
-        // 2. REPLCONF listening-port <PORT>
+        // 2. send REPLCONF listening-port <PORT>
         let port = &self.config.port;
         let replconf_1 =
             format!("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{port}\r\n");
@@ -109,7 +114,7 @@ impl Server {
         master_response.put_slice(b"+OK\r\n");
         assert_eq!(buf, master_response);
 
-        // 3. REPLCONF capa psync2
+        // 3. send REPLCONF capa psync2
         let replconf_2 = b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
         stream.write_all(replconf_2).await?;
         stream.flush().await?;
@@ -118,31 +123,79 @@ impl Server {
         stream.read_buf(&mut buf).await?;
         assert_eq!(buf, master_response);
 
-        // 4. PSYNC ? -1 (PSYNC replicationid offset)
+        // 4. send PSYNC ? -1 (PSYNC replicationid offset)
         let psync = b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
         stream.write_all(psync).await?;
         stream.flush().await?;
 
         buf.clear();
 
-        let mut buf = BytesMut::with_capacity(149); // Reader buffer for reading FULLSYNC with RBD file
+        // 5. receive FULLSYNC response (+FULLRESYNC hdtdb24osaagg3pklp48uhf0297kgwsge1rp2l5n 0)
+        let mut line = String::new();
+        stream.read_line(&mut line).await?;
+        buf.put_slice(line.as_bytes());
 
-        stream.read_buf(&mut buf).await?;
-        if !buf.starts_with(b"+FULLRESYNC") {
+        let t = match RESPType::parse(&mut buf).context("parsing RESP type") {
+            Ok(t) => t,
+            Err(err) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "handshake failed, error parsing RESP type: {}",
+                        err.root_cause()
+                    ),
+                ));
+            }
+        };
+
+        if let RESPType::String(s) = t {
+            if !(s.len() == 53 && s.starts_with("FULLRESYNC")) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "handshake failed, could not synchronize with master (FULLRESYNC)",
+                ));
+            }
+        } else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                "handshake failed, could not synchronize with master",
+                "handshake failed, could not synchronize with master (parsing FULLRESYNC)",
+            ));
+        }
+
+        // 6. receive RDB file response
+        line.clear();
+        stream.read_line(&mut line).await?;
+
+        if let Ok(Some(len)) = line
+            .strip_prefix('$')
+            .map(str::trim_end)
+            .map(str::parse::<usize>)
+            .transpose()
+        {
+            let mut rdb_file_buf = BytesMut::with_capacity(len);
+            stream.read_buf(&mut rdb_file_buf).await?;
+
+            if !rdb_file_buf.starts_with(b"REDIS0011") {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "handshake failed, could not read RDB file",
+                ));
+            }
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "handshake failed, could not synchronize with master (parsing RDB file - length)",
             ));
         }
 
         println!("Server is running as a replica of '{}'", &master_addr);
-        dbg!(buf);
+
         Ok(stream)
     }
 }
 
 struct ConnectionHandler {
-    stream: TcpStream,
+    stream: BufReader<TcpStream>,
     storage: Arc<Storage>,
     state: Arc<SharedState>,
     mode: ConnectionMode,
@@ -158,7 +211,7 @@ enum ConnectionMode {
 
 impl ConnectionHandler {
     pub fn new(
-        stream: TcpStream,
+        stream: BufReader<TcpStream>,
         mode: ConnectionMode,
         storage: Arc<Storage>,
         state: Arc<SharedState>,
@@ -280,7 +333,7 @@ impl ConnectionHandler {
                             Ok(r) => r,
                             Err(err) => {
                                 self.handle_error(err).await?;
-                                continue;
+                                break;
                             }
                         };
 

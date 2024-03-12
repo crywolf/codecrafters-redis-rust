@@ -151,17 +151,17 @@ impl Command {
                 println!("Recieved handhake from replica: PSYNC {arg1} {arg2}");
                 if let Some((master_replid, master_repl_offset)) = storage.get_repl_id_and_offset()
                 {
-                    let file = storage.get_rbd_file();
+                    let rdb_file = storage.get_rdb_file();
                     let msg = format!(
                         "+FULLRESYNC {} {}\r\n${}\r\n",
                         master_replid,
                         master_repl_offset,
-                        file.len()
+                        rdb_file.len()
                     );
                     println!("Sending resync data to replica: FULLRESYNC...");
 
                     let mut b = BytesMut::from(msg.as_bytes());
-                    b.extend_from_slice(&file);
+                    b.extend_from_slice(&rdb_file);
                     Bytes::from(b)
                 } else {
                     Bytes::from("$-1\r\n")
