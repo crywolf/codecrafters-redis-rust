@@ -18,6 +18,7 @@ pub enum Command {
         args: (String, String),
         replicas_count: usize,
     },
+    Config(String, String),
 }
 
 impl Command {
@@ -97,6 +98,11 @@ impl Command {
                     replicas_count: 0,
                 }
             }
+            "CONFIG" => {
+                let arg1 = Self::get_arg(&mut parts)?;
+                let arg2 = Self::get_arg(&mut parts)?;
+                Self::Config(arg1.data.to_uppercase(), arg2.data)
+            }
             _ => unimplemented!(),
         };
 
@@ -171,6 +177,37 @@ impl Command {
                 args: _,
                 replicas_count,
             } => Bytes::from(format!(":{}\r\n", replicas_count)),
+            Self::Config(comm, key) => {
+                let conf = storage.get_config();
+                if comm != "GET" {
+                    bail!("Invalid config command: {}", comm)
+                }
+                if !["dir", "dbfilename"].contains(&key.as_str()) {
+                    bail!("Invalid config key: {}", key)
+                }
+                if key == "dir" {
+                    if let Some(val) = &conf.dir {
+                        Bytes::from(format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", val.len(), val))
+                    } else {
+                        Bytes::from("$-1\r\n")
+                    }
+                } else if key == "dbfilename" {
+                    let out = if let Some(val) = &conf.db_filename {
+                        format!(
+                            "*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                            key.len(),
+                            key,
+                            val.len(),
+                            val
+                        )
+                    } else {
+                        "$-1\r\n".to_owned()
+                    };
+                    Bytes::from(out)
+                } else {
+                    Bytes::from("$-1\r\n")
+                }
+            }
         };
         Ok(response)
     }

@@ -7,6 +7,8 @@ pub struct Config {
     pub port: String,
     pub master_addr: Option<String>,
     pub master_port: Option<String>,
+    pub dir: Option<String>,
+    pub db_filename: Option<String>,
 }
 
 impl Config {
@@ -16,6 +18,8 @@ impl Config {
             port: DEFAULT_PORT.to_owned(),
             master_addr: None,
             master_port: None,
+            dir: None,
+            db_filename: None,
         }
     }
 

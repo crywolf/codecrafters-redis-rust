@@ -28,6 +28,12 @@ async fn main() -> std::io::Result<()> {
                 config.master_addr = args.next();
                 config.master_port = args.next();
             }
+            "--dir" => {
+                config.dir = args.next();
+            }
+            "--dbfilename" => {
+                config.db_filename = args.next();
+            }
             _ => {}
         }
     }

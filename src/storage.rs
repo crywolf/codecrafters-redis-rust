@@ -56,6 +56,10 @@ impl Storage {
         None
     }
 
+    pub fn get_config(&self) -> Arc<Config> {
+        Arc::clone(&self.config)
+    }
+
     pub fn get_info(&self, arg: &str) -> Option<String> {
         let mut info = String::from("# Replication");
 
