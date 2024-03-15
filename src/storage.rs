@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
-};
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 
@@ -11,7 +7,7 @@ use crate::db::DB;
 
 pub struct Storage {
     pub db: DB,
-    data: Mutex<HashMap<String, Item>>,
+    //data: Mutex<HashMap<String, Item>>,
     config: Arc<Config>,
     /// Number of bytes of commands processed by this replica
     processed_bytes: Mutex<usize>,
@@ -23,40 +19,10 @@ impl Storage {
     pub fn new(config: Arc<Config>) -> std::io::Result<Self> {
         Ok(Self {
             db: DB::from(config.get_db_filepath())?,
-            data: Mutex::new(HashMap::new()),
             config,
             processed_bytes: Mutex::new(0),
             processed_write_commands_bytes: Mutex::new(0),
         })
-    }
-
-    pub fn set(&self, key: &str, item: Item) {
-        self.data
-            .lock()
-            .expect("should be able to lock the mutex")
-            .insert(key.to_owned(), item);
-    }
-
-    pub fn get(&self, key: &str) -> Option<Item> {
-        if let Some(item) = self
-            .data
-            .lock()
-            .expect("should be able to lock the mutex")
-            .get(key)
-            .cloned()
-        {
-            if item.expiry_ms == 0 {
-                return Some(item);
-            }
-
-            let expiry = Duration::from_millis(item.expiry_ms);
-            if item.changed.elapsed() > expiry {
-                return None;
-            }
-
-            return Some(item);
-        }
-        None
     }
 
     pub fn get_config(&self) -> Arc<Config> {
@@ -149,23 +115,5 @@ impl Storage {
             .step_by(2)
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap_or_default())
             .collect()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Item {
-    pub value: String,
-    pub expiry_ms: u64,
-    changed: Instant,
-}
-
-impl Item {
-    pub fn new(value: &str, expiry_ms: u64) -> Self {
-        let changed = Instant::now();
-        Self {
-            value: value.to_owned(),
-            expiry_ms,
-            changed,
-        }
     }
 }

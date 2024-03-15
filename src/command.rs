@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use crate::db::Item;
 use crate::resp::{BulkString, RESPType};
-use crate::storage::{Item, Storage};
+use crate::storage::Storage;
 use anyhow::{bail, Result};
 use bytes::{Bytes, BytesMut};
 
@@ -126,11 +127,11 @@ impl Command {
             Self::Set(key, value, expiry) => {
                 let expiry_ms = expiry.parse().unwrap_or_default();
                 let item = Item::new(value, expiry_ms);
-                storage.set(key, item);
+                storage.db.set(key, item);
                 Bytes::from("+OK\r\n")
             }
             Self::Get(key) => {
-                let val = match storage.get(key) {
+                let val = match storage.db.get(key) {
                     Some(item) => format!("${}\r\n{}\r\n", item.value.len(), item.value),
                     None => String::from("$-1\r\n"),
                 };

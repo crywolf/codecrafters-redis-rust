@@ -1,8 +1,12 @@
-use std::{collections::HashMap, fs, path::Path, sync::Mutex};
+use std::{
+    collections::HashMap,
+    fs,
+    path::Path,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use bytes::{Buf, Bytes};
-
-use crate::storage::Item;
 
 #[allow(dead_code)]
 pub struct DB {
@@ -114,5 +118,52 @@ impl DB {
             .keys()
             .map(|k| k.to_owned())
             .collect()
+    }
+
+    pub fn set(&self, key: &str, item: Item) {
+        self.data
+            .lock()
+            .expect("should be able to lock the mutex")
+            .insert(key.to_owned(), item);
+    }
+
+    pub fn get(&self, key: &str) -> Option<Item> {
+        if let Some(item) = self
+            .data
+            .lock()
+            .expect("should be able to lock the mutex")
+            .get(key)
+            .cloned()
+        {
+            if item.expiry_ms == 0 {
+                return Some(item);
+            }
+
+            let expiry = Duration::from_millis(item.expiry_ms);
+            if item.changed.elapsed() > expiry {
+                return None;
+            }
+
+            return Some(item);
+        }
+        None
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Item {
+    pub value: String,
+    pub expiry_ms: u64,
+    changed: Instant,
+}
+
+impl Item {
+    pub fn new(value: &str, expiry_ms: u64) -> Self {
+        let changed = Instant::now();
+        Self {
+            value: value.to_owned(),
+            expiry_ms,
+            changed,
+        }
     }
 }
