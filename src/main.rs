@@ -1,5 +1,6 @@
 mod command;
 mod config;
+mod db;
 mod resp;
 mod server;
 mod storage;
@@ -38,7 +39,7 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
-    let storage: Arc<Storage> = Arc::new(Storage::new(Arc::new(config.clone())));
+    let storage: Arc<Storage> = Arc::new(Storage::new(Arc::new(config.clone()))?);
 
     let mut server = Server::new(config, storage);
 

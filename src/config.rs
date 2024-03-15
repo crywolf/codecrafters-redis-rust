@@ -41,4 +41,13 @@ impl Config {
     pub fn is_replica(&self) -> bool {
         self.master_addr.is_some() && self.master_port.is_some()
     }
+
+    pub fn get_db_filepath(&self) -> Option<String> {
+        if let Some(dir) = &self.dir {
+            if let Some(filename) = &self.db_filename {
+                return Some(format!("{}/{}", dir, filename));
+            }
+        }
+        None
+    }
 }

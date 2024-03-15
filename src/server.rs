@@ -250,7 +250,6 @@ impl ConnectionHandler {
                     println!("Listening as {:?}", self.mode);
 
                     while !buf.is_empty() {
-                        dbg!(&buf);
                         let bytes_read = buf.len();
 
                         let t = match RESPType::parse(&mut buf).context("parsing RESP type") {

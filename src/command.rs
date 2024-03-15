@@ -19,6 +19,7 @@ pub enum Command {
         replicas_count: usize,
     },
     Config(String, String),
+    Keys(String),
 }
 
 impl Command {
@@ -102,6 +103,10 @@ impl Command {
                 let arg1 = Self::get_arg(&mut parts)?;
                 let arg2 = Self::get_arg(&mut parts)?;
                 Self::Config(arg1.data.to_uppercase(), arg2.data)
+            }
+            "KEYS" => {
+                let arg = Self::get_arg(&mut parts)?;
+                Self::Keys(arg.data)
             }
             _ => unimplemented!(),
         };
@@ -208,6 +213,17 @@ impl Command {
                     Bytes::from("$-1\r\n")
                 }
             }
+            Self::Keys(pattern) => {
+                if pattern == "*" {
+                    let keys = storage.db.keys(pattern);
+                    let count = 1; //keys.len();
+                    let key = keys.get(0).unwrap();
+                    let len = key.len();
+                    Bytes::from(format!("*{count}\r\n${len}\r\n{key}\r\n"))
+                } else {
+                    Bytes::from("$-1\r\n")
+                }
+            }
         };
         Ok(response)
     }
@@ -268,7 +284,7 @@ mod tests {
         let command = r.unwrap();
 
         let config = Arc::new(Config::new());
-        let storage: Arc<Storage> = Arc::new(Storage::new(config));
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
         let r = command.response(storage);
         assert!(r.is_ok());
         let response = r.unwrap();
@@ -289,7 +305,7 @@ mod tests {
         let command = r.unwrap();
 
         let config = Arc::new(Config::new());
-        let storage: Arc<Storage> = Arc::new(Storage::new(config));
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
         let r = command.response(storage);
         assert!(r.is_ok());
         let response = r.unwrap();
@@ -302,7 +318,7 @@ mod tests {
     #[test]
     fn test_replconf_command() {
         let config = Arc::new(Config::new());
-        let storage: Arc<Storage> = Arc::new(Storage::new(config));
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
 
         let mut buf = BytesMut::new();
         // REPLCONF listening-port <PORT>
@@ -356,7 +372,7 @@ mod tests {
         let command = r.unwrap();
 
         let config = Arc::new(Config::new());
-        let storage: Arc<Storage> = Arc::new(Storage::new(config));
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
         let r = command.response(storage);
         assert!(r.is_ok());
         let response = r.unwrap();
@@ -368,7 +384,7 @@ mod tests {
     #[test]
     fn test_set_and_get_command() {
         let config = Arc::new(Config::new());
-        let storage: Arc<Storage> = Arc::new(Storage::new(config));
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
 
         // SET command
         let mut buf = BytesMut::new();
@@ -423,7 +439,7 @@ mod tests {
     #[test]
     fn test_set_and_get_command_with_expiration() {
         let config = Arc::new(Config::new());
-        let storage: Arc<Storage> = Arc::new(Storage::new(config));
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
 
         // SET command: SET foo bar PX 100
         let mut buf = BytesMut::new();
@@ -473,7 +489,7 @@ mod tests {
     #[test]
     fn test_commands_pipelining() {
         let config = Arc::new(Config::new());
-        let storage: Arc<Storage> = Arc::new(Storage::new(config));
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
 
         let mut responses = vec![];
 

@@ -7,8 +7,10 @@ use std::{
 use bytes::Bytes;
 
 use crate::config::Config;
+use crate::db::DB;
 
 pub struct Storage {
+    pub db: DB,
     data: Mutex<HashMap<String, Item>>,
     config: Arc<Config>,
     /// Number of bytes of commands processed by this replica
@@ -18,13 +20,14 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn new(config: Arc<Config>) -> Self {
-        Self {
+    pub fn new(config: Arc<Config>) -> std::io::Result<Self> {
+        Ok(Self {
+            db: DB::from(config.get_db_filepath())?,
             data: Mutex::new(HashMap::new()),
             config,
             processed_bytes: Mutex::new(0),
             processed_write_commands_bytes: Mutex::new(0),
-        }
+        })
     }
 
     pub fn set(&self, key: &str, item: Item) {
