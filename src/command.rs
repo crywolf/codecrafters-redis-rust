@@ -217,10 +217,13 @@ impl Command {
             Self::Keys(pattern) => {
                 if pattern == "*" {
                     let keys = storage.db.keys(pattern);
-                    let count = 1; //keys.len();
-                    let key = keys.get(0).unwrap();
-                    let len = key.len();
-                    Bytes::from(format!("*{count}\r\n${len}\r\n{key}\r\n"))
+                    let count = keys.len();
+                    let mut res = format!("*{count}\r\n");
+                    for key in keys {
+                        let len = key.len();
+                        res.push_str(&format!("${len}\r\n{key}\r\n"));
+                    }
+                    Bytes::from(res)
                 } else {
                     Bytes::from("$-1\r\n")
                 }
