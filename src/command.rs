@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::db::Item;
 use crate::resp::{BulkString, RESPType};
@@ -48,17 +49,25 @@ impl Command {
             "SET" => {
                 let key = Self::get_arg(&mut parts)?;
                 let val = Self::get_arg(&mut parts)?;
-                let expiry = if let Some(_px) = parts.find(|arg| {
-                    if let RESPType::Bulk(k) = arg {
-                        &k.data.to_lowercase() == "px"
+                let mut exp_key = "".to_string();
+                let expiry = if let Some(_exp) = parts.find(|arg| {
+                    if let RESPType::Bulk(key) = arg {
+                        exp_key = key.data.to_uppercase();
+                        &key.data.to_uppercase() == "PX" || &key.data.to_lowercase() == "PXAT"
                     } else {
                         false
                     }
                 }) {
-                    if let Some(RESPType::Bulk(exp)) = parts.next() {
-                        exp
+                    if let Some(RESPType::Bulk(mut exp_val)) = parts.next() {
+                        if exp_key == "PX" {
+                            // Time was provided as relative, change it to absolute time
+                            let exp_at = SystemTime::now().duration_since(UNIX_EPOCH)?
+                                + Duration::from_millis(exp_val.data.parse()?);
+                            exp_val.data = exp_at.as_millis().to_string();
+                        }
+                        exp_val
                     } else {
-                        bail!("SET command is missing PX value miliseconds")
+                        bail!("SET command is missing PX or PXAT value (miliseconds)")
                     }
                 } else {
                     BulkString {
@@ -481,7 +490,7 @@ mod tests {
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$3\r\nbar\r\n"));
 
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        std::thread::sleep(std::time::Duration::from_millis(110));
 
         // GET command - after expiration
         let r = command.response(Arc::clone(&storage));

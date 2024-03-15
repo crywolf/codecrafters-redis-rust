@@ -3,7 +3,7 @@ use std::{
     fs,
     path::Path,
     sync::Mutex,
-    time::{Duration, Instant},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use bytes::{Buf, Bytes};
@@ -46,6 +46,8 @@ impl DB {
         let magic_str =
             String::from_utf8(f.split_to(5).to_vec()).map_err(Self::invalid_data_err)?;
         let version = String::from_utf8(f.split_to(4).to_vec()).map_err(Self::invalid_data_err)?;
+
+        // We support only the first database
         for (i, &v) in f.iter().enumerate() {
             // 0xFB indicates a resizedb field
             if v == 0xFB {
@@ -71,15 +73,30 @@ impl DB {
             data: Mutex::new(HashMap::new()),
         };
 
+        // Import key-value pairs from the table
         for _ in 0..table_size {
-            let value_type = f.get_u8();
+            let mut expiry_time_ms: u64 = 0;
+            let mut value_type = f.get_u8();
+
+            if value_type == 0xFD {
+                // expiry time in seconds (4 bytes little endian)
+                expiry_time_ms = f.get_u32_le() as u64 * 1000;
+            } else if value_type == 0xFC {
+                // expiry time in ms (8 bytes little endian)
+                expiry_time_ms = f.get_u64_le();
+            }
+
+            if expiry_time_ms != 0 {
+                value_type = f.get_u8();
+            }
+
             if value_type != 0 {
                 // support only for this length encoding type: 00 - The next 6 bits represent the length
                 unimplemented!();
             }
 
             let key = Self::decode_string(&mut f)?;
-            let value = Item::new(Self::decode_string(&mut f)?.as_str(), 0);
+            let value = Item::new(Self::decode_string(&mut f)?.as_str(), expiry_time_ms);
 
             db.data
                 .lock()
@@ -93,10 +110,10 @@ impl DB {
     fn decode_length(buf: &mut Bytes, length: u8) -> u32 {
         // https://rdb.fnordig.de/file_format.html#length-encoding
         match length {
-            0b00000000..=0b00111111 => u32::from_be_bytes([0x00, 0x00, 0x00, length]),
-            0b01000000..=0b01111111 => u32::from_be_bytes([0x00, 0x00, buf.get_u8(), length]),
-            0b10000000..=0b10111111 => buf.get_u32(),
-            0b11000000..=0b11111111 => 00,
+            0b00000000..=0b00111111 => u32::from_be_bytes([0x00, 0x00, 0x00, length]), // The next 6 bits represent the length
+            0b01000000..=0b01111111 => u32::from_be_bytes([0x00, 0x00, buf.get_u8(), length]), // Read one additional byte. The combined 14 bits represent the length
+            0b10000000..=0b10111111 => buf.get_u32(), // Discard the remaining 6 bits. The next 4 bytes from the stream represent the length
+            0b11000000..=0b11111111 => 00, // The next object is encoded in a special format
         }
     }
 
@@ -139,8 +156,12 @@ impl DB {
                 return Some(item);
             }
 
-            let expiry = Duration::from_millis(item.expiry_ms);
-            if item.changed.elapsed() > expiry {
+            if SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()?
+                .as_millis() as u64
+                > item.expiry_ms
+            {
                 return None;
             }
 
@@ -154,16 +175,13 @@ impl DB {
 pub struct Item {
     pub value: String,
     pub expiry_ms: u64,
-    changed: Instant,
 }
 
 impl Item {
     pub fn new(value: &str, expiry_ms: u64) -> Self {
-        let changed = Instant::now();
         Self {
             value: value.to_owned(),
             expiry_ms,
-            changed,
         }
     }
 }
