@@ -22,6 +22,7 @@ pub enum Command {
     },
     Config(String, String),
     Keys(String),
+    Type(String),
 }
 
 impl Command {
@@ -117,6 +118,10 @@ impl Command {
             "KEYS" => {
                 let arg = Self::get_arg(&mut parts)?;
                 Self::Keys(arg.data)
+            }
+            "TYPE" => {
+                let arg = Self::get_arg(&mut parts)?;
+                Self::Type(arg.data)
             }
             _ => unimplemented!(),
         };
@@ -236,6 +241,13 @@ impl Command {
                 } else {
                     Bytes::from("$-1\r\n")
                 }
+            }
+            Self::Type(key) => {
+                let val = match storage.db.get(key) {
+                    Some(_) => String::from("+string\r\n"),
+                    None => String::from("+none\r\n"),
+                };
+                Bytes::from(val)
             }
         };
         Ok(response)
@@ -528,5 +540,63 @@ mod tests {
         }
 
         assert_eq!(responses.len(), 3);
+    }
+
+    #[test]
+    fn test_type_command() {
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
+
+        let mut buf = BytesMut::new();
+
+        // TYPE command - nonexisting key
+        buf.extend_from_slice("*2\r\n$4\r\nTYPE\r\n$3\r\nfoo\r\n".as_bytes());
+
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let r = command.response(Arc::clone(&storage));
+        assert!(r.is_ok());
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"+none\r\n"));
+
+        // SET command: SET foo bar PX 100
+        buf.extend_from_slice(
+            "*5\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n$2\r\nPX\r\n$3\r\n100\r\n".as_bytes(),
+        );
+
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let r = command.response(Arc::clone(&storage)); // SET command
+        assert!(r.is_ok());
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"+OK\r\n"));
+
+        // TYPE command - existing key
+        buf.extend_from_slice("*2\r\n$4\r\nTYPE\r\n$3\r\nfoo\r\n".as_bytes());
+
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let r = command.response(Arc::clone(&storage));
+        assert!(r.is_ok());
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"+string\r\n"));
     }
 }
