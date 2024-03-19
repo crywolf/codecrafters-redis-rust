@@ -4,6 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::db::Item;
 use crate::resp::{BulkString, RESPType};
 use crate::storage::Storage;
+use crate::stream::{Entry, KeyValue};
 use anyhow::{bail, Result};
 use bytes::{Bytes, BytesMut};
 
@@ -23,6 +24,7 @@ pub enum Command {
     Config(String, String),
     Keys(String),
     Type(String),
+    Xadd(Vec<String>),
 }
 
 impl Command {
@@ -122,6 +124,22 @@ impl Command {
             "TYPE" => {
                 let arg = Self::get_arg(&mut parts)?;
                 Self::Type(arg.data)
+            }
+            "XADD" => {
+                if parts.len() < 4 {
+                    // xadd stream_key 1526919030474-0 temperature 36
+                    bail!("not enough arguments");
+                }
+                let args = parts
+                    .filter_map(|s| {
+                        if let RESPType::Bulk(arg) = s {
+                            Some(arg.data)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                Self::Xadd(args)
             }
             _ => unimplemented!(),
         };
@@ -244,10 +262,34 @@ impl Command {
             }
             Self::Type(key) => {
                 let val = match storage.db.get(key) {
+                    None => {
+                        if storage.db.streams().exists(key) {
+                            String::from("+stream\r\n")
+                        } else {
+                            String::from("+none\r\n")
+                        }
+                    }
                     Some(_) => String::from("+string\r\n"),
-                    None => String::from("+none\r\n"),
                 };
                 Bytes::from(val)
+            }
+            Self::Xadd(args) => {
+                let stream_key = &args[0];
+                let mut id = args[1].clone();
+
+                let mut key_values: Vec<KeyValue> = Vec::new();
+                for double in args[2..].chunks_exact(2) {
+                    if double.len() != 2 {
+                        bail!("Expected 'field' and 'value', got {:?}", double)
+                    }
+                    key_values.push(KeyValue {
+                        key: double[0].clone(),
+                        value: double[1].clone(),
+                    });
+                }
+                id = storage.db.xadd(stream_key, Entry { id, key_values });
+
+                Bytes::from(format!("${}\r\n{id}\r\n", id.len()))
             }
         };
         Ok(response)
@@ -598,5 +640,56 @@ mod tests {
         assert!(r.is_ok());
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+string\r\n"));
+
+        // STREAMS
+        // XADD command: XADD stream_key 1526919030474-0 temperature 36 humidity 95
+        buf.extend_from_slice("*7\r\n$4\r\nXADD\r\n$10\r\nstream_key\r\n$15\r\n1526919030474-0\r\n$11\r\ntemperature\r\n$2\r\n36\r\n$8\r\nhumidity\r\n$2\r\n95\r\n".as_bytes());
+
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let r = command.response(Arc::clone(&storage)); // XADD command
+        assert!(r.is_ok());
+
+        // TYPE command - existing stream key
+        buf.extend_from_slice("*2\r\n$4\r\nTYPE\r\n$10\r\nstream_key\r\n".as_bytes());
+
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let r = command.response(Arc::clone(&storage));
+        assert!(r.is_ok());
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"+stream\r\n"));
+    }
+
+    #[test]
+    fn test_xadd_command() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice("*7\r\n$4\r\nXADD\r\n$10\r\nstream_key\r\n$15\r\n1526919030474-0\r\n$11\r\ntemperature\r\n$2\r\n36\r\n$8\r\nhumidity\r\n$2\r\n95\r\n".as_bytes());
+
+        let out = RESPType::parse(&mut buf);
+        assert!(out.is_ok());
+        let resp = out.unwrap();
+        let r = Command::parse(resp);
+        assert!(r.is_ok());
+        let command = r.unwrap();
+
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
+        let r = command.response(storage);
+        assert!(r.is_ok());
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"$15\r\n1526919030474-0\r\n"));
     }
 }

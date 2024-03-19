@@ -5,6 +5,7 @@ mod db;
 mod resp;
 mod server;
 mod storage;
+mod stream;
 
 use config::Config;
 use server::Server;

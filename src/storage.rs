@@ -7,7 +7,6 @@ use crate::db::DB;
 
 pub struct Storage {
     pub db: DB,
-    //data: Mutex<HashMap<String, Item>>,
     config: Arc<Config>,
     /// Number of bytes of commands processed by this replica
     processed_bytes: Mutex<usize>,

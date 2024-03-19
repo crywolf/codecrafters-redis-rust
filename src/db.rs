@@ -8,6 +8,8 @@ use std::{
 
 use bytes::{Buf, Bytes};
 
+use crate::stream::{Entry, Streams};
+
 #[allow(dead_code)]
 pub struct DB {
     magic_str: String,      // "REDIS"
@@ -15,6 +17,7 @@ pub struct DB {
     table_size: u32,        // Size of the corresponding hash table
     table_expiry_size: u32, // Size of the corresponding expire hash table
     data: Mutex<HashMap<String, Item>>,
+    streams: Streams,
 }
 
 impl DB {
@@ -27,6 +30,7 @@ impl DB {
             table_size: 0,
             table_expiry_size: 0,
             data: Mutex::new(HashMap::new()),
+            streams: Streams::new(),
         };
 
         if filepath.is_none() {
@@ -71,6 +75,7 @@ impl DB {
             table_size,
             table_expiry_size,
             data: Mutex::new(HashMap::new()),
+            streams: Streams::new(),
         };
 
         // Import key-value pairs from the table
@@ -168,6 +173,14 @@ impl DB {
             return Some(item);
         }
         None
+    }
+
+    pub fn xadd(&self, key: &str, entry: Entry) -> String {
+        self.streams.add(key, entry)
+    }
+
+    pub fn streams(&self) -> &Streams {
+        &self.streams
     }
 }
 
