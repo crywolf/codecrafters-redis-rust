@@ -148,7 +148,7 @@ impl Command {
     }
 
     pub fn is_write(&self) -> bool {
-        matches!(self, Self::Set { .. })
+        matches!(self, Self::Set { .. } | Self::Xadd { .. })
     }
 
     pub fn response(&self, storage: Arc<Storage>) -> Result<Bytes> {
@@ -325,6 +325,23 @@ impl Command {
                     value,
                 )
                 .into_bytes()
+            }
+            Self::Xadd(args) => {
+                let stream_key = &args[0];
+                let id = &args[1];
+
+                let mut s = format!(
+                    "*{}\r\n$4\r\nXADD\r\n${}\r\n{stream_key}\r\n${}\r\n{id}\r\n",
+                    args.len() + 1,
+                    stream_key.len(),
+                    id.len()
+                );
+
+                for arg in args[2..].iter() {
+                    s.push_str(&format!("${}\r\n{}\r\n", arg.len(), arg))
+                }
+
+                s.into_bytes()
             }
             _ => unimplemented!(),
         }
