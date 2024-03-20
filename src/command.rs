@@ -709,4 +709,42 @@ mod tests {
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$15\r\n1526919030474-0\r\n"));
     }
+
+    #[test]
+    fn test_xadd_command_partial_id_generation() {
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
+
+        // 1st call
+        let command =
+            "*5\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$3\r\n1-*\r\n$3\r\nfoo\r\n$3\r\nbar\r\n";
+        let r = call_command(command, storage.clone());
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"$3\r\n1-0\r\n"));
+
+        // 2nd call
+        let command =
+            "*5\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$3\r\n1-*\r\n$3\r\nfoo\r\n$3\r\nbaz\r\n";
+        let r = call_command(command, storage.clone());
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"$3\r\n1-1\r\n"));
+
+        // 3nd call
+        let command =
+            "*5\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$3\r\n5-*\r\n$3\r\nfoo\r\n$3\r\nbaz\r\n";
+        let r = call_command(command, storage);
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"$3\r\n5-0\r\n"));
+    }
+
+    /// helper function
+    fn call_command(command_str: &str, storage: Arc<Storage>) -> Result<Bytes> {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(command_str.as_bytes());
+
+        let resp = RESPType::parse(&mut buf)?;
+        let command = Command::parse(resp)?;
+
+        command.response(storage)
+    }
 }

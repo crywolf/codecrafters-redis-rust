@@ -14,9 +14,8 @@ impl Streams {
     }
 
     pub fn add(&self, stream_key: &str, entry: Entry) -> Result<String> {
-        let id = entry.raw_id.clone();
-
-        self.streams
+        let id = self
+            .streams
             .lock()
             .expect("sould be able lick the mutex")
             .entry(stream_key.to_owned())
@@ -50,24 +49,44 @@ impl Stream {
         }
     }
 
-    pub fn add(&mut self, entry: Entry) -> Result<()> {
+    pub fn add(&mut self, entry: Entry) -> Result<String> {
         let id = entry.get_id();
 
-        if id.time_ms == 0 && id.sequence_num == 0 {
+        let time_ms = id.time_part.parse().context(format!(
+            "parsing entry id (milisecondsTime): {}",
+            id.time_part
+        ))?;
+
+        let sequence_num = if id.sequence_part.eq_ignore_ascii_case("*") {
+            if time_ms == self.max_time {
+                self.max_sequence_num + 1
+            } else {
+                0
+            }
+        } else {
+            id.sequence_part.parse().context(format!(
+                "parsing entry id (sequenceNumber): {}",
+                id.sequence_part
+            ))?
+        };
+
+        if time_ms == 0 && sequence_num == 0 {
             bail!("The ID specified in XADD must be greater than 0-0")
         }
-        if id.time_ms < self.max_time {
+        if time_ms < self.max_time {
             bail!("The ID specified in XADD is equal or smaller than the target stream top item")
         }
-        if id.time_ms == self.max_time && id.sequence_num <= self.max_sequence_num {
+        if time_ms == self.max_time && sequence_num <= self.max_sequence_num {
             bail!("The ID specified in XADD is equal or smaller than the target stream top item")
         }
 
-        self.max_time = id.time_ms;
-        self.max_sequence_num = id.sequence_num;
+        self.max_time = time_ms;
+        self.max_sequence_num = sequence_num;
         self.entries.push(entry);
 
-        Ok(())
+        let id = format!("{}-{}", time_ms, sequence_num);
+
+        Ok(id)
     }
 }
 
@@ -91,13 +110,12 @@ impl Entry {
             bail!("The ID specified in XADD is invalid: {}", id);
         }
 
+        let time_part = parts[0].to_string();
+        let sequence_part = parts[1].to_string();
+
         let id = ID {
-            time_ms: parts[0]
-                .parse()
-                .context(format!("parsing entry id (milisecondsTime): {}", parts[0]))?,
-            sequence_num: parts[1]
-                .parse()
-                .context(format!("parsing entry id (sequenceNumber): {}", parts[1]))?,
+            time_part,
+            sequence_part,
         };
 
         Ok(Self {
@@ -114,6 +132,6 @@ impl Entry {
 
 #[derive(Clone)]
 pub struct ID {
-    pub time_ms: u64,
-    pub sequence_num: u64,
+    pub time_part: String,
+    pub sequence_part: String,
 }
