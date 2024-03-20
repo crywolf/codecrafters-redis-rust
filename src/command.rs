@@ -556,7 +556,7 @@ mod tests {
         // 2nd call
         let command =
             "*5\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$3\r\n1-*\r\n$3\r\nfoo\r\n$3\r\nbaz\r\n";
-        let r = call_command(command, storage.clone());
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$3\r\n1-1\r\n"));
 
@@ -566,6 +566,47 @@ mod tests {
         let r = call_command(command, storage);
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$3\r\n5-0\r\n"));
+    }
+
+    #[test]
+    fn test_xadd_command_full_id_generation() {
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
+
+        // 1st call
+        let command = "*5\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$1\r\n*\r\n$3\r\nfoo\r\n$3\r\nbar\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        let response = r.unwrap();
+        assert!(response.starts_with(b"$15\r\n"));
+        assert!(response.ends_with(b"-0\r\n"));
+
+        let ms = response
+            .strip_prefix(b"$15\r\n")
+            .unwrap()
+            .strip_suffix(b"-0\r\n")
+            .unwrap();
+        assert_eq!(ms.len(), 13);
+
+        let time_ms_orig = std::str::from_utf8(ms).unwrap().parse::<u64>().unwrap(); // 1710945822609;
+
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        // 2nd call
+        let command = "*5\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$1\r\n*\r\n$3\r\nfoo\r\n$3\r\nbaz\r\n";
+        let r = call_command(command, storage);
+        let response = r.unwrap();
+        assert!(response.starts_with(b"$15\r\n"));
+        assert!(response.ends_with(b"-0\r\n"));
+
+        let ms = response
+            .strip_prefix(b"$15\r\n")
+            .unwrap()
+            .strip_suffix(b"-0\r\n")
+            .unwrap();
+        assert_eq!(ms.len(), 13);
+
+        let time_ms = std::str::from_utf8(ms).unwrap().parse::<u64>().unwrap(); // 1710945822611;
+        assert!(time_ms >= time_ms_orig + 2);
     }
 
     /// helper function

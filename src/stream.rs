@@ -1,6 +1,6 @@
-use std::{collections::HashMap, sync::Mutex};
-
 use anyhow::{bail, Context, Result};
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, sync::Mutex};
 
 pub struct Streams {
     streams: Mutex<HashMap<String, Stream>>,
@@ -52,10 +52,14 @@ impl Stream {
     pub fn add(&mut self, entry: Entry) -> Result<String> {
         let id = entry.get_id();
 
-        let time_ms = id.time_part.parse().context(format!(
-            "parsing entry id (milisecondsTime): {}",
-            id.time_part
-        ))?;
+        let time_ms = if id.time_part.eq_ignore_ascii_case("*") {
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64
+        } else {
+            id.time_part.parse().context(format!(
+                "parsing entry id (milisecondsTime): {}",
+                id.time_part
+            ))?
+        };
 
         let sequence_num = if id.sequence_part.eq_ignore_ascii_case("*") {
             if time_ms == self.max_time {
@@ -104,14 +108,20 @@ pub struct Entry {
 impl Entry {
     pub fn new(id: String, key_values: Vec<KeyValue>) -> Result<Self> {
         let raw_id = id.clone();
+        let time_part: String;
+        let sequence_part: String;
 
-        let parts: Vec<_> = id.split('-').collect();
-        if parts.len() != 2 {
-            bail!("The ID specified in XADD is invalid: {}", id);
+        if !id.eq_ignore_ascii_case("*") {
+            let parts: Vec<_> = id.split('-').collect();
+            if parts.len() != 2 {
+                bail!("The ID specified in XADD is invalid: {}", id);
+            }
+            time_part = parts[0].to_string();
+            sequence_part = parts[1].to_string();
+        } else {
+            time_part = String::from("*");
+            sequence_part = String::from("*");
         }
-
-        let time_part = parts[0].to_string();
-        let sequence_part = parts[1].to_string();
 
         let id = ID {
             time_part,
