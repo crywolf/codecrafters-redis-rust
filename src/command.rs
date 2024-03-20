@@ -357,41 +357,22 @@ mod tests {
 
     #[test]
     fn test_echo_command() {
-        let mut buf = BytesMut::new();
-        buf.extend_from_slice("*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
         let config = Arc::new(Config::new());
         let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
-        let r = command.response(storage);
-        assert!(r.is_ok());
+
+        let command = "*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n";
+        let r = call_command(command, storage);
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+hey\r\n"));
     }
 
     #[test]
     fn test_info_command() {
-        let mut buf = BytesMut::new();
-        buf.extend_from_slice("*2\r\n$4\r\nINFO\r\n$11\r\nreplication\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
         let config = Arc::new(Config::new());
         let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
-        let r = command.response(storage);
-        assert!(r.is_ok());
+
+        let command = "*2\r\n$4\r\nINFO\r\n$11\r\nreplication\r\n";
+        let r = call_command(command, storage);
         let response = r.unwrap();
         assert_eq!(
             response,
@@ -404,61 +385,27 @@ mod tests {
         let config = Arc::new(Config::new());
         let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
 
-        let mut buf = BytesMut::new();
         // REPLCONF listening-port <PORT>
-        buf.extend_from_slice(
-            "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n".as_bytes(),
-        );
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(Arc::clone(&storage));
-        assert!(r.is_ok());
+        let command = "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n";
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+OK\r\n"));
 
         // REPLCONF capa eof capa psync2
-        buf.extend_from_slice(
-            "*5\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$3\r\neof\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
-                .as_bytes(),
-        );
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(Arc::clone(&storage));
-        assert!(r.is_ok());
+        let command =
+            "*5\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$3\r\neof\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+OK\r\n"));
     }
 
     #[test]
     fn test_psync_command() {
-        let mut buf = BytesMut::new();
-        buf.extend_from_slice("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
         let config = Arc::new(Config::new());
         let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
-        let r = command.response(storage);
-        assert!(r.is_ok());
+
+        let command = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
+        let r = call_command(command, storage);
         let response = r.unwrap();
         assert!(response.starts_with(&Bytes::from_static(
             b"+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n$88\r\nREDIS0011"
@@ -471,51 +418,20 @@ mod tests {
         let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
 
         // SET command
-        let mut buf = BytesMut::new();
-        buf.extend_from_slice("*3\r\n$3\r\nSET\r\n$5\r\nmykey\r\n$7\r\n\"Hello\"\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(Arc::clone(&storage)); // SET command
-        assert!(r.is_ok());
+        let command = "*3\r\n$3\r\nSET\r\n$5\r\nmykey\r\n$7\r\n\"Hello\"\r\n";
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+OK\r\n"));
 
         // GET command
-        buf.extend_from_slice("*2\r\n$3\r\nGET\r\n$5\r\nmykey\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(Arc::clone(&storage)); // GET command
-        assert!(r.is_ok());
+        let command = "*2\r\n$3\r\nGET\r\n$5\r\nmykey\r\n";
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$7\r\n\"Hello\"\r\n"));
 
         // GET command - nonexistent key
-        buf.extend_from_slice("*2\r\n$3\r\nGET\r\n$5\r\nwrong\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(storage); // GET command
-        assert!(r.is_ok());
+        let command = "*2\r\n$3\r\nGET\r\n$5\r\nwrong\r\n";
+        let r = call_command(command, storage);
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$-1\r\n"));
     }
@@ -525,48 +441,25 @@ mod tests {
         let config = Arc::new(Config::new());
         let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
 
-        // SET command: SET foo bar PX 100
-        let mut buf = BytesMut::new();
-        buf.extend_from_slice(
-            "*5\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n$2\r\nPX\r\n$3\r\n100\r\n".as_bytes(),
-        );
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(Arc::clone(&storage)); // SET command
-        assert!(r.is_ok());
+        let command = "*5\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n$2\r\nPX\r\n$3\r\n100\r\n";
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+OK\r\n"));
 
         // GET command - immediatelly
-        buf.extend_from_slice("*2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
+        let command = "*2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        let response = r.unwrap();
 
         // GET command - before expiration
-        let r = command.response(Arc::clone(&storage));
-        assert!(r.is_ok());
-        let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$3\r\nbar\r\n"));
 
         std::thread::sleep(std::time::Duration::from_millis(110));
 
-        // GET command - after expiration
-        let r = command.response(Arc::clone(&storage));
-        assert!(r.is_ok());
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
+
+        // GET command - after expiration
         assert_eq!(response, Bytes::from_static(b"$-1\r\n"));
     }
 
@@ -606,106 +499,44 @@ mod tests {
         let config = Arc::new(Config::new());
         let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
 
-        let mut buf = BytesMut::new();
-
         // TYPE command - nonexisting key
-        buf.extend_from_slice("*2\r\n$4\r\nTYPE\r\n$3\r\nfoo\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(Arc::clone(&storage));
-        assert!(r.is_ok());
+        let command = "*2\r\n$4\r\nTYPE\r\n$3\r\nfoo\r\n";
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+none\r\n"));
 
         // SET command: SET foo bar PX 100
-        buf.extend_from_slice(
-            "*5\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n$2\r\nPX\r\n$3\r\n100\r\n".as_bytes(),
-        );
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(Arc::clone(&storage)); // SET command
-        assert!(r.is_ok());
+        let command = "*5\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n$2\r\nPX\r\n$3\r\n100\r\n";
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+OK\r\n"));
 
         // TYPE command - existing key
-        buf.extend_from_slice("*2\r\n$4\r\nTYPE\r\n$3\r\nfoo\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(Arc::clone(&storage));
-        assert!(r.is_ok());
+        let command = "*2\r\n$4\r\nTYPE\r\n$3\r\nfoo\r\n";
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+string\r\n"));
 
         // STREAMS
         // XADD command: XADD stream_key 1526919030474-0 temperature 36 humidity 95
-        buf.extend_from_slice("*7\r\n$4\r\nXADD\r\n$10\r\nstream_key\r\n$15\r\n1526919030474-0\r\n$11\r\ntemperature\r\n$2\r\n36\r\n$8\r\nhumidity\r\n$2\r\n95\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(Arc::clone(&storage)); // XADD command
+        let command = "*7\r\n$4\r\nXADD\r\n$10\r\nstream_key\r\n$15\r\n1526919030474-0\r\n$11\r\ntemperature\r\n$2\r\n36\r\n$8\r\nhumidity\r\n$2\r\n95\r\n";
+        let r = call_command(command, Arc::clone(&storage));
         assert!(r.is_ok());
 
         // TYPE command - existing stream key
-        buf.extend_from_slice("*2\r\n$4\r\nTYPE\r\n$10\r\nstream_key\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
-        let r = command.response(Arc::clone(&storage));
-        assert!(r.is_ok());
+        let command = "*2\r\n$4\r\nTYPE\r\n$10\r\nstream_key\r\n";
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"+stream\r\n"));
     }
 
     #[test]
     fn test_xadd_command() {
-        let mut buf = BytesMut::new();
-        buf.extend_from_slice("*7\r\n$4\r\nXADD\r\n$10\r\nstream_key\r\n$15\r\n1526919030474-0\r\n$11\r\ntemperature\r\n$2\r\n36\r\n$8\r\nhumidity\r\n$2\r\n95\r\n".as_bytes());
-
-        let out = RESPType::parse(&mut buf);
-        assert!(out.is_ok());
-        let resp = out.unwrap();
-        let r = Command::parse(resp);
-        assert!(r.is_ok());
-        let command = r.unwrap();
-
         let config = Arc::new(Config::new());
         let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
-        let r = command.response(storage);
-        assert!(r.is_ok());
+
+        let command = "*7\r\n$4\r\nXADD\r\n$10\r\nstream_key\r\n$15\r\n1526919030474-0\r\n$11\r\ntemperature\r\n$2\r\n36\r\n$8\r\nhumidity\r\n$2\r\n95\r\n";
+        let r = call_command(command, storage);
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$15\r\n1526919030474-0\r\n"));
     }
@@ -718,7 +549,7 @@ mod tests {
         // 1st call
         let command =
             "*5\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$3\r\n1-*\r\n$3\r\nfoo\r\n$3\r\nbar\r\n";
-        let r = call_command(command, storage.clone());
+        let r = call_command(command, Arc::clone(&storage));
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"$3\r\n1-0\r\n"));
 
