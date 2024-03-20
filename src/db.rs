@@ -6,9 +6,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use bytes::{Buf, Bytes};
-
 use crate::stream::{Entry, Streams};
+use anyhow::Result;
+use bytes::{Buf, Bytes};
 
 #[allow(dead_code)]
 pub struct DB {
@@ -175,7 +175,7 @@ impl DB {
         None
     }
 
-    pub fn xadd(&self, key: &str, entry: Entry) -> String {
+    pub fn xadd(&self, key: &str, entry: Entry) -> Result<String> {
         self.streams.add(key, entry)
     }
 

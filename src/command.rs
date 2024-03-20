@@ -287,7 +287,7 @@ impl Command {
                         value: double[1].clone(),
                     });
                 }
-                id = storage.db.xadd(stream_key, Entry { id, key_values });
+                id = storage.db.xadd(stream_key, Entry::new(id, key_values)?)?;
 
                 Bytes::from(format!("${}\r\n{id}\r\n", id.len()))
             }
