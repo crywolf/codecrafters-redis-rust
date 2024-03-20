@@ -180,6 +180,10 @@ impl DB {
         self.streams.add(key, entry)
     }
 
+    pub fn xrange(&self, key: &str, start: &str, end: &str) -> Result<Vec<Entry>> {
+        self.streams.range(key, start, end)
+    }
+
     pub fn streams(&self) -> &Streams {
         &self.streams
     }

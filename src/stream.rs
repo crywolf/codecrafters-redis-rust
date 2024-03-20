@@ -26,6 +26,33 @@ impl Streams {
         Ok(id)
     }
 
+    pub fn range(&self, stream_key: &str, start: &str, end: &str) -> Result<Vec<Entry>> {
+        let mut nstart = start;
+        let mut nend = end;
+
+        let s: String = format!("{start}-0");
+        let e: String = format!("{end}-{}", u64::MAX);
+        if !start.contains('-') {
+            nstart = &s;
+        }
+        if !end.contains('-') {
+            nend = &e;
+        }
+
+        let streams = self.streams.lock().expect("sould be able lick the mutex");
+
+        let stream = streams.get(stream_key).context("range querying stream")?;
+
+        let range = stream
+            .entries
+            .iter()
+            .filter(|&e| e.raw_id.as_str() >= nstart && e.raw_id.as_str() <= nend)
+            .cloned()
+            .collect();
+
+        Ok(range)
+    }
+
     pub fn exists(&self, stream_key: &str) -> bool {
         self.streams
             .lock()
@@ -94,11 +121,13 @@ impl Stream {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct KeyValue {
     pub key: String,
     pub value: String,
 }
 
+#[derive(Clone, Debug)]
 pub struct Entry {
     raw_id: String,
     id: ID,
@@ -135,12 +164,20 @@ impl Entry {
         })
     }
 
-    pub fn get_id(&self) -> ID {
+    fn get_id(&self) -> ID {
         self.id.clone()
+    }
+
+    pub fn get_raw_id(&self) -> String {
+        self.raw_id.clone()
+    }
+
+    pub fn get_key_values(&self) -> &[KeyValue] {
+        &self.key_values
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ID {
     pub time_part: String,
     pub sequence_part: String,

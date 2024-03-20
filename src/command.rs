@@ -25,6 +25,7 @@ pub enum Command {
     Keys(String),
     Type(String),
     Xadd(Vec<String>),
+    Xrange(String, String, String),
 }
 
 impl Command {
@@ -140,6 +141,13 @@ impl Command {
                     })
                     .collect();
                 Self::Xadd(args)
+            }
+            "XRANGE" => {
+                // xrange some_key 1526985054069 1526985054079
+                let stream_key = Self::get_arg(&mut parts)?.data;
+                let start = Self::get_arg(&mut parts)?.data;
+                let end = Self::get_arg(&mut parts)?.data;
+                Self::Xrange(stream_key, start, end)
             }
             _ => unimplemented!(),
         };
@@ -290,6 +298,24 @@ impl Command {
                 id = storage.db.xadd(stream_key, Entry::new(id, key_values)?)?;
 
                 Bytes::from(format!("${}\r\n{id}\r\n", id.len()))
+            }
+            Self::Xrange(stream_key, start, end) => {
+                let entries = storage.db.xrange(stream_key, start, end)?;
+                let mut out = format!("*{}\r\n", entries.len());
+
+                for entry in entries.iter() {
+                    let id = entry.get_raw_id();
+                    out.push_str(format!("*2\r\n${}\r\n{}\r\n", id.len(), id).as_str());
+
+                    let key_values = entry.get_key_values();
+                    out.push_str(format!("*{}\r\n", key_values.len() * 2).as_str());
+
+                    for kv in key_values.iter() {
+                        out.push_str(format!("${}\r\n{}\r\n", kv.key.len(), kv.key).as_str());
+                        out.push_str(format!("${}\r\n{}\r\n", kv.value.len(), kv.value).as_str());
+                    }
+                }
+                Bytes::from(out)
             }
         };
         Ok(response)
@@ -607,6 +633,35 @@ mod tests {
 
         let time_ms = std::str::from_utf8(ms).unwrap().parse::<u64>().unwrap(); // 1710945822611;
         assert!(time_ms >= time_ms_orig + 2);
+    }
+
+    #[test]
+    fn test_xrange_command() {
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
+
+        let command = "*7\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$15\r\n1526985054059-3\r\n$11\r\ntemperature\r\n$2\r\n30\r\n$8\r\nhumidity\r\n$2\r\n72\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        let command = "*7\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$15\r\n1526985054069-0\r\n$11\r\ntemperature\r\n$2\r\n36\r\n$8\r\nhumidity\r\n$2\r\n95\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        let command = "*7\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$15\r\n1526985054079-0\r\n$11\r\ntemperature\r\n$2\r\n37\r\n$8\r\nhumidity\r\n$2\r\n94\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        let command = "*7\r\n$4\r\nXADD\r\n$8\r\nsome_key\r\n$15\r\n1526985054089-0\r\n$11\r\ntemperature\r\n$2\r\n28\r\n$8\r\nhumidity\r\n$2\r\n65\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        let command =
+            "*4\r\n$6\r\nXRANGE\r\n$8\r\nsome_key\r\n$13\r\n1526985054069\r\n$13\r\n1526985054079\r\n";
+        let r = call_command(command, storage);
+
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"*2\r\n*2\r\n$15\r\n1526985054069-0\r\n*4\r\n$11\r\ntemperature\r\n$2\r\n36\r\n$8\r\nhumidity\r\n$2\r\n95\r\n*2\r\n$15\r\n1526985054079-0\r\n*4\r\n$11\r\ntemperature\r\n$2\r\n37\r\n$8\r\nhumidity\r\n$2\r\n94\r\n"));
     }
 
     /// helper function
