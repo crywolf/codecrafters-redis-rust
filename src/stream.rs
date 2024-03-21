@@ -39,8 +39,12 @@ impl Streams {
             nend = &e;
         }
 
+        let e: String = format!("{}-{}", u64::MAX, u64::MAX);
         if start == "-" {
             nstart = "0-0";
+        }
+        if end == "+" {
+            nend = &e;
         }
 
         let streams = self.streams.lock().expect("sould be able lick the mutex");
