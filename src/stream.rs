@@ -61,6 +61,30 @@ impl Streams {
         Ok(range)
     }
 
+    pub fn read(&self, stream_key: &str, start: &str) -> Result<Vec<Entry>> {
+        let mut nstart = start;
+
+        let s: String = format!("{start}-0");
+        if !start.contains('-') {
+            nstart = &s;
+        }
+        let e: String = format!("{}-{}", u64::MAX, u64::MAX);
+        let nend = e.as_str();
+
+        let streams = self.streams.lock().expect("sould be able lick the mutex");
+
+        let stream = streams.get(stream_key).context("range querying stream")?;
+
+        let range = stream
+            .entries
+            .iter()
+            .filter(|&e| e.raw_id.as_str() > nstart && e.raw_id.as_str() <= nend)
+            .cloned()
+            .collect();
+
+        Ok(range)
+    }
+
     pub fn exists(&self, stream_key: &str) -> bool {
         self.streams
             .lock()

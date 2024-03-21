@@ -184,6 +184,10 @@ impl DB {
         self.streams.range(key, start, end)
     }
 
+    pub fn xread(&self, key: &str, start: &str) -> Result<Vec<Entry>> {
+        self.streams.read(key, start)
+    }
+
     pub fn streams(&self) -> &Streams {
         &self.streams
     }
