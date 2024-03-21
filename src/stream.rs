@@ -39,6 +39,10 @@ impl Streams {
             nend = &e;
         }
 
+        if start == "-" {
+            nstart = "0-0";
+        }
+
         let streams = self.streams.lock().expect("sould be able lick the mutex");
 
         let stream = streams.get(stream_key).context("range querying stream")?;

@@ -656,12 +656,20 @@ mod tests {
         let r = call_command(command, Arc::clone(&storage));
         assert!(r.is_ok());
 
+        // XRANGE some_key 152698505406 1526985054079
         let command =
             "*4\r\n$6\r\nXRANGE\r\n$8\r\nsome_key\r\n$13\r\n1526985054069\r\n$13\r\n1526985054079\r\n";
-        let r = call_command(command, storage);
+        let r = call_command(command, Arc::clone(&storage));
 
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"*2\r\n*2\r\n$15\r\n1526985054069-0\r\n*4\r\n$11\r\ntemperature\r\n$2\r\n36\r\n$8\r\nhumidity\r\n$2\r\n95\r\n*2\r\n$15\r\n1526985054079-0\r\n*4\r\n$11\r\ntemperature\r\n$2\r\n37\r\n$8\r\nhumidity\r\n$2\r\n94\r\n"));
+
+        // XRANGE some_key - 1526985054079
+        let command = "*4\r\n$6\r\nXRANGE\r\n$8\r\nsome_key\r\n$1\r\n-\r\n$13\r\n1526985054079\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"*3\r\n*2\r\n$15\r\n1526985054059-3\r\n*4\r\n$11\r\ntemperature\r\n$2\r\n30\r\n$8\r\nhumidity\r\n$2\r\n72\r\n*2\r\n$15\r\n1526985054069-0\r\n*4\r\n$11\r\ntemperature\r\n$2\r\n36\r\n$8\r\nhumidity\r\n$2\r\n95\r\n*2\r\n$15\r\n1526985054079-0\r\n*4\r\n$11\r\ntemperature\r\n$2\r\n37\r\n$8\r\nhumidity\r\n$2\r\n94\r\n"));
     }
 
     /// helper function
