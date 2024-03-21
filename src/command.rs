@@ -26,7 +26,7 @@ pub enum Command {
     Type(String),
     Xadd(Vec<String>),
     Xrange(String, String, String),
-    Xread(String, String),
+    Xread(Vec<String>),
 }
 
 impl Command {
@@ -151,11 +151,21 @@ impl Command {
                 Self::Xrange(stream_key, start, end)
             }
             "XREAD" => {
-                // xrange streams some_key 1526985054069 1526985054079
-                let _ = Self::get_arg(&mut parts)?.data;
-                let stream_key = Self::get_arg(&mut parts)?.data;
-                let start = Self::get_arg(&mut parts)?.data;
-                Self::Xread(stream_key, start)
+                // xread streams some_key 1526985054069
+                // xread streams stream_key other_stream_key 0-0 0-1
+                if parts.len() < 3 {
+                    bail!("not enough arguments");
+                }
+                let args = parts
+                    .filter_map(|s| {
+                        if let RESPType::Bulk(arg) = s {
+                            Some(arg.data)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                Self::Xread(args)
             }
             _ => unimplemented!(),
         };
@@ -325,22 +335,50 @@ impl Command {
                 }
                 Bytes::from(out)
             }
-            Self::Xread(stream_key, start) => {
-                let entries = storage.db.xread(stream_key, start)?;
-                let mut out = String::from("*1\r\n");
-                out.push_str(format!("*2\r\n${}\r\n{stream_key}\r\n", stream_key.len()).as_str());
-                out.push_str(format!("*{}\r\n", entries.len()).as_str());
+            Self::Xread(args) => {
+                let mut stream_keys = Vec::new();
+                let mut starts = Vec::new();
 
-                for entry in entries.iter() {
-                    let id = entry.get_raw_id();
-                    out.push_str(format!("*2\r\n${}\r\n{}\r\n", id.len(), id).as_str());
+                if args.len() == 3 {
+                    // xread streams some_key 1526985054069
+                    stream_keys.push(args[1].as_str());
+                    starts.push(args[2].as_str());
+                } else if args.len() == 5 {
+                    // xread streams stream_key other_stream_key 0-0 0-1
+                    stream_keys = args[1..=2].iter().map(String::as_str).collect();
+                    starts = args[3..=4].iter().map(String::as_str).collect();
+                }
 
-                    let key_values = entry.get_key_values();
-                    out.push_str(format!("*{}\r\n", key_values.len() * 2).as_str());
+                let entries = storage.db.xread(&stream_keys, &starts)?;
+                dbg!(&stream_keys, &entries);
+                let mut out = format!("*{}\r\n", stream_keys.len());
 
-                    for kv in key_values.iter() {
-                        out.push_str(format!("${}\r\n{}\r\n", kv.key.len(), kv.key).as_str());
-                        out.push_str(format!("${}\r\n{}\r\n", kv.value.len(), kv.value).as_str());
+                for &stream_key in stream_keys.iter() {
+                    out.push_str(
+                        format!("*2\r\n${}\r\n{stream_key}\r\n", stream_key.len()).as_str(),
+                    );
+
+                    let stream_entries: Vec<_> = entries
+                        .iter()
+                        .filter(|e| e.get_stream_key().is_some_and(|s| s == stream_key))
+                        .collect();
+
+                    out.push_str(format!("*{}\r\n", stream_entries.len()).as_str());
+
+                    for entry in stream_entries {
+                        dbg!(&entry);
+                        let id = entry.get_raw_id();
+                        out.push_str(format!("*2\r\n${}\r\n{}\r\n", id.len(), id).as_str());
+
+                        let key_values = entry.get_key_values();
+                        out.push_str(format!("*{}\r\n", key_values.len() * 2).as_str());
+
+                        for kv in key_values.iter() {
+                            out.push_str(format!("${}\r\n{}\r\n", kv.key.len(), kv.key).as_str());
+                            out.push_str(
+                                format!("${}\r\n{}\r\n", kv.value.len(), kv.value).as_str(),
+                            );
+                        }
                     }
                 }
                 Bytes::from(out)
@@ -735,6 +773,30 @@ mod tests {
 
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"*1\r\n*2\r\n$8\r\nsome_key\r\n*2\r\n*2\r\n$15\r\n1526985054079-0\r\n*4\r\n$11\r\ntemperature\r\n$2\r\n37\r\n$8\r\nhumidity\r\n$2\r\n94\r\n*2\r\n$15\r\n1526985054089-0\r\n*4\r\n$11\r\ntemperature\r\n$2\r\n28\r\n$8\r\nhumidity\r\n$2\r\n65\r\n"));
+    }
+
+    #[test]
+    fn test_xread_command_multiple_streams() {
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
+
+        // xadd stream_key 0-1 temperature 95
+        let command = "*5\r\n$4\r\nXADD\r\n$10\r\nstream_key\r\n$3\r\n0-1\r\n$11\r\ntemperature\r\n$2\r\n95\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        // xadd other_stream_key 0-2 humidity 97
+        let command = "*5\r\n$4\r\nXADD\r\n$16\r\nother_stream_key\r\n$3\r\n0-2\r\n$8\r\nhumidity\r\n$2\r\n97\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        // xread streams stream_key other_stream_key 0-0 0-1
+        let command =
+            "*6\r\n$5\r\nXREAD\r\n$7\r\nSTREAMS\r\n$10\r\nstream_key\r\n$16\r\nother_stream_key\r\n$3\r\n0-0\r\n$3\r\n0-1\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"*2\r\n*2\r\n$10\r\nstream_key\r\n*1\r\n*2\r\n$3\r\n0-1\r\n*2\r\n$11\r\ntemperature\r\n$2\r\n95\r\n*2\r\n$16\r\nother_stream_key\r\n*1\r\n*2\r\n$3\r\n0-2\r\n*2\r\n$8\r\nhumidity\r\n$2\r\n97\r\n"));
     }
 
     /// helper function

@@ -61,28 +61,44 @@ impl Streams {
         Ok(range)
     }
 
-    pub fn read(&self, stream_key: &str, start: &str) -> Result<Vec<Entry>> {
-        let mut nstart = start;
-
-        let s: String = format!("{start}-0");
-        if !start.contains('-') {
-            nstart = &s;
+    pub fn read(&self, stream_keys: &[&str], starts: &[&str]) -> Result<Vec<Entry>> {
+        if stream_keys.len() != starts.len() {
+            bail!("IDs count does not match keys count");
         }
-        let e: String = format!("{}-{}", u64::MAX, u64::MAX);
-        let nend = e.as_str();
 
-        let streams = self.streams.lock().expect("sould be able lick the mutex");
+        let mut response = Vec::new();
 
-        let stream = streams.get(stream_key).context("range querying stream")?;
+        for (i, &stream_key) in stream_keys.iter().enumerate() {
+            let start = starts[i];
 
-        let range = stream
-            .entries
-            .iter()
-            .filter(|&e| e.raw_id.as_str() > nstart && e.raw_id.as_str() <= nend)
-            .cloned()
-            .collect();
+            let mut nstart = start;
 
-        Ok(range)
+            let s: String = format!("{start}-0");
+            if !start.contains('-') {
+                nstart = &s;
+            }
+            let e: String = format!("{}-{}", u64::MAX, u64::MAX);
+            let nend = e.as_str();
+
+            let streams = self.streams.lock().expect("sould be able lick the mutex");
+
+            let stream = streams.get(stream_key).context("range querying stream")?;
+
+            let mut range: Vec<_> = stream
+                .entries
+                .iter()
+                .filter(|&e| e.raw_id.as_str() > nstart && e.raw_id.as_str() <= nend)
+                .cloned()
+                .map(|mut e| {
+                    e.stream_key = Some(stream_key.to_string());
+                    e
+                })
+                .collect();
+
+            response.append(&mut range);
+        }
+
+        Ok(response)
     }
 
     pub fn exists(&self, stream_key: &str) -> bool {
@@ -161,6 +177,7 @@ pub struct KeyValue {
 
 #[derive(Clone, Debug)]
 pub struct Entry {
+    stream_key: Option<String>,
     raw_id: String,
     id: ID,
     key_values: Vec<KeyValue>,
@@ -190,14 +207,15 @@ impl Entry {
         };
 
         Ok(Self {
+            stream_key: None,
             raw_id,
             id,
             key_values,
         })
     }
 
-    fn get_id(&self) -> ID {
-        self.id.clone()
+    pub fn get_stream_key(&self) -> Option<String> {
+        self.stream_key.clone()
     }
 
     pub fn get_raw_id(&self) -> String {
@@ -206,6 +224,10 @@ impl Entry {
 
     pub fn get_key_values(&self) -> &[KeyValue] {
         &self.key_values
+    }
+
+    fn get_id(&self) -> ID {
+        self.id.clone()
     }
 }
 
