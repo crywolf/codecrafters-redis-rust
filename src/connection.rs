@@ -156,27 +156,41 @@ impl ConnectionHandler {
                                 self.storage.db.subscribe_to_stream(self.connection_id, key, tx.clone())?;
                             }
 
-                            println!("> XREAD command - start waiting for {timeout} ms");
-                            let timeout = tokio::time::sleep(Duration::from_millis(*timeout));
+                            if *timeout == 0 {
+                                println!("> XREAD command - start waiting without timeout");
+                                rx.recv().await;
+                                println!("> XREAD command - received response");
 
-                            tokio::select! {
-                                _ = rx.recv() => {
-                                    for key in stream_keys {
-                                        self.storage.db.unsubscribe_from_stream(self.connection_id, key)?;
-                                    }
-                                    command = Command::Xread{ stream_keys: stream_keys.to_vec(), starts: starts.to_vec(), block: None };
+                                for key in stream_keys {
+                                    self.storage.db.unsubscribe_from_stream(self.connection_id, key)?;
                                 }
-                                _ = timeout => {
-                                    println!("> XREAD command - timouted");
-                                    for key in stream_keys {
-                                        self.storage.db.unsubscribe_from_stream(self.connection_id, key)?;
-                                    }
-                                    // Sending (nil) response
-                                    let response =  Bytes::from("$-1\r\n");
-                                    self.stream.write_all(&response).await?;
-                                    self.stream.flush().await?;
 
-                                    break;
+                                command = Command::Xread{ stream_keys: stream_keys.to_vec(), starts: starts.to_vec(), block: None };
+
+                            } else {
+                                println!("> XREAD command - start waiting for {timeout} ms");
+                                let timeout = tokio::time::sleep(Duration::from_millis(*timeout));
+
+                                tokio::select! {
+                                    _ = rx.recv() => {
+                                        for key in stream_keys {
+                                            println!("> XREAD command - received response");
+                                            self.storage.db.unsubscribe_from_stream(self.connection_id, key)?;
+                                        }
+                                        command = Command::Xread{ stream_keys: stream_keys.to_vec(), starts: starts.to_vec(), block: None };
+                                    }
+                                    _ = timeout => {
+                                        println!("> XREAD command - timouted");
+                                        for key in stream_keys {
+                                            self.storage.db.unsubscribe_from_stream(self.connection_id, key)?;
+                                        }
+                                        // Sending (nil) response
+                                        let response =  Bytes::from("$-1\r\n");
+                                        self.stream.write_all(&response).await?;
+                                        self.stream.flush().await?;
+
+                                        break;
+                                    }
                                 }
                             }
                         }
