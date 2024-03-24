@@ -26,7 +26,11 @@ pub enum Command {
     Type(String),
     Xadd(Vec<String>),
     Xrange(String, String, String),
-    Xread(Vec<String>),
+    Xread {
+        stream_keys: Vec<String>,
+        starts: Vec<String>,
+        block: Option<u64>,
+    },
 }
 
 impl Command {
@@ -153,10 +157,11 @@ impl Command {
             "XREAD" => {
                 // xread streams some_key 1526985054069
                 // xread streams stream_key other_stream_key 0-0 0-1
+                // xread block 1000 streams stream_key 0-1
                 if parts.len() < 3 {
                     bail!("not enough arguments");
                 }
-                let args = parts
+                let args: Vec<_> = parts
                     .filter_map(|s| {
                         if let RESPType::Bulk(arg) = s {
                             Some(arg.data)
@@ -165,7 +170,33 @@ impl Command {
                         }
                     })
                     .collect();
-                Self::Xread(args)
+
+                let mut block = None;
+                let mut stream_keys = Vec::new();
+                let mut starts = Vec::new();
+
+                if args[0].to_uppercase() == "STREAMS" {
+                    if args.len() == 3 {
+                        // xread streams some_key 1526985054069
+                        stream_keys.push(args[1].clone());
+                        starts.push(args[2].clone());
+                    } else if args.len() == 5 {
+                        // xread streams stream_key other_stream_key 0-0 0-1
+                        stream_keys = args[1..=2].to_vec();
+                        starts = args[3..=4].to_vec();
+                    }
+                } else if args[0].to_uppercase() == "BLOCK" && args.len() == 5 {
+                    // xread block 1000 streams stream_key 0-1
+                    block = Some(args[1].parse::<u64>()?);
+                    stream_keys.push(args[3].clone());
+                    starts.push(args[4].clone());
+                }
+
+                Self::Xread {
+                    starts,
+                    stream_keys,
+                    block,
+                }
             }
             _ => unimplemented!(),
         };
@@ -335,22 +366,15 @@ impl Command {
                 }
                 Bytes::from(out)
             }
-            Self::Xread(args) => {
-                let mut stream_keys = Vec::new();
-                let mut starts = Vec::new();
-
-                if args.len() == 3 {
-                    // xread streams some_key 1526985054069
-                    stream_keys.push(args[1].as_str());
-                    starts.push(args[2].as_str());
-                } else if args.len() == 5 {
-                    // xread streams stream_key other_stream_key 0-0 0-1
-                    stream_keys = args[1..=2].iter().map(String::as_str).collect();
-                    starts = args[3..=4].iter().map(String::as_str).collect();
-                }
+            Self::Xread {
+                stream_keys,
+                starts,
+                ..
+            } => {
+                let stream_keys: Vec<_> = stream_keys.iter().map(String::as_str).collect();
+                let starts: Vec<_> = starts.iter().map(String::as_str).collect();
 
                 let entries = storage.db.xread(&stream_keys, &starts)?;
-                dbg!(&stream_keys, &entries);
                 let mut out = format!("*{}\r\n", stream_keys.len());
 
                 for &stream_key in stream_keys.iter() {
@@ -366,7 +390,6 @@ impl Command {
                     out.push_str(format!("*{}\r\n", stream_entries.len()).as_str());
 
                     for entry in stream_entries {
-                        dbg!(&entry);
                         let id = entry.get_raw_id();
                         out.push_str(format!("*2\r\n${}\r\n{}\r\n", id.len(), id).as_str());
 
@@ -797,6 +820,30 @@ mod tests {
 
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"*2\r\n*2\r\n$10\r\nstream_key\r\n*1\r\n*2\r\n$3\r\n0-1\r\n*2\r\n$11\r\ntemperature\r\n$2\r\n95\r\n*2\r\n$16\r\nother_stream_key\r\n*1\r\n*2\r\n$3\r\n0-2\r\n*2\r\n$8\r\nhumidity\r\n$2\r\n97\r\n"));
+    }
+
+    #[test]
+    fn test_xread_blocking_command() {
+        let config = Arc::new(Config::new());
+        let storage: Arc<Storage> = Arc::new(Storage::new(config).unwrap());
+
+        // xadd stream_key 0-1 temperature 96
+        let command = "*5\r\n$4\r\nXADD\r\n$10\r\nstream_key\r\n$3\r\n0-1\r\n$11\r\ntemperature\r\n$2\r\n96\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        // xadd stream_key 0-2 temperature 95
+        let command = "*5\r\n$4\r\nXADD\r\n$10\r\nstream_key\r\n$3\r\n0-2\r\n$11\r\ntemperature\r\n$2\r\n95\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        // xread block 1000 streams stream_key 0-1
+        let command = "*6\r\n$5\r\nXREAD\r\n$5\r\nBLOCK\r\n$4\r\n1000\r\n$7\r\nSTREAMS\r\n$10\r\nstream_key\r\n$3\r\n0-1\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"*1\r\n*2\r\n$10\r\nstream_key\r\n*1\r\n*2\r\n$3\r\n0-2\r\n*2\r\n$11\r\ntemperature\r\n$2\r\n95\r\n"));
     }
 
     /// helper function

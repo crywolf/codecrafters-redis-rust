@@ -128,7 +128,7 @@ impl ConnectionHandler {
                                 loop {
                                     let synced_replicas = self.state.synced_replicas();
 
-                                    command = Command::Wait{args: args.clone(), replicas_count: synced_replicas };
+                                    command = Command::Wait{ args: args.clone(), replicas_count: synced_replicas };
 
                                     if synced_replicas >= expected_replicas {
                                         println!("> WAIT command - OK: {:?}", start.elapsed());
@@ -143,6 +143,31 @@ impl ConnectionHandler {
                                 }
 
                                 self.state.reset_sent_write_command_bytes();
+                            }
+                        }
+
+                        if let Command::Xread{ stream_keys, starts, block: Some(timeout) } = &command {
+                            let (tx, mut rx) = mpsc::channel::<()>(1);
+                            for key in stream_keys {
+                                self.storage.db.subscribe_to_stream(key, tx.clone())?;
+                            }
+
+                            println!("> XREAD command - start waiting for {timeout} ms");
+                            let timeout = tokio::time::sleep(Duration::from_millis(*timeout));
+
+                            tokio::select! {
+                                _ = rx.recv() => {
+                                    command = Command::Xread{ stream_keys: stream_keys.to_vec(), starts: starts.to_vec(), block: None };
+                                }
+                                _ = timeout => {
+                                    println!("> XREAD command - timouted");
+                                    // Sending (nil) response
+                                    let response =  Bytes::from("$-1\r\n");
+                                    self.stream.write_all(&response).await?;
+                                    self.stream.flush().await?;
+
+                                    break;
+                                }
                             }
                         }
 

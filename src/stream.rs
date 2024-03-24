@@ -1,6 +1,7 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Context, Ok, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, sync::Mutex};
+use tokio::sync::mpsc;
 
 pub struct Streams {
     streams: Mutex<HashMap<String, Stream>>,
@@ -14,14 +15,15 @@ impl Streams {
     }
 
     pub fn add(&self, stream_key: &str, entry: Entry) -> Result<String> {
-        let id = self
-            .streams
-            .lock()
-            .expect("sould be able lick the mutex")
+        let mut streams = self.streams.lock().expect("should be able lock the mutex");
+
+        let stream = streams
             .entry(stream_key.to_owned())
-            .or_insert(Stream::new())
-            .add(entry)
-            .context("adding entry to stream")?;
+            .or_insert(Stream::new());
+
+        let id = stream.add(entry).context("adding entry to stream")?;
+
+        stream.notify()?;
 
         Ok(id)
     }
@@ -47,9 +49,11 @@ impl Streams {
             nend = &e;
         }
 
-        let streams = self.streams.lock().expect("sould be able lick the mutex");
+        let streams = self.streams.lock().expect("should be able lock the mutex");
 
-        let stream = streams.get(stream_key).context("range querying stream")?;
+        let stream = streams
+            .get(stream_key)
+            .context(format!("range querying stream '{stream_key}'"))?;
 
         let range = stream
             .entries
@@ -80,9 +84,11 @@ impl Streams {
             let e: String = format!("{}-{}", u64::MAX, u64::MAX);
             let nend = e.as_str();
 
-            let streams = self.streams.lock().expect("sould be able lick the mutex");
+            let streams = self.streams.lock().expect("should be able lock the mutex");
 
-            let stream = streams.get(stream_key).context("range querying stream")?;
+            let stream = streams
+                .get(stream_key)
+                .context(format!("range querying stream '{stream_key}'"))?;
 
             let mut range: Vec<_> = stream
                 .entries
@@ -104,8 +110,20 @@ impl Streams {
     pub fn exists(&self, stream_key: &str) -> bool {
         self.streams
             .lock()
-            .expect("sould be able lick the mutex")
+            .expect("should be able lock the mutex")
             .contains_key(stream_key)
+    }
+
+    pub fn subscribe_to_stream(&self, stream_key: &str, tx: mpsc::Sender<()>) -> Result<()> {
+        self.streams
+            .lock()
+            .expect("should be able lock the mutex")
+            .entry(stream_key.to_owned())
+            .and_modify(|e| e.notifiers.push(Notifier::new(tx)));
+
+        println!("Subscribed to notifications for stream '{stream_key}'");
+
+        Ok(())
     }
 }
 
@@ -113,6 +131,7 @@ struct Stream {
     max_time: u64,
     max_sequence_num: u64,
     entries: Vec<Entry>,
+    notifiers: Vec<Notifier>,
 }
 
 impl Stream {
@@ -121,6 +140,7 @@ impl Stream {
             max_time: 0,
             max_sequence_num: 0,
             entries: Vec::new(),
+            notifiers: Vec::new(),
         }
     }
 
@@ -166,6 +186,31 @@ impl Stream {
         let id = format!("{}-{}", time_ms, sequence_num);
 
         Ok(id)
+    }
+
+    pub fn notify(&self) -> Result<()> {
+        for n in self.notifiers.iter() {
+            n.notify()?;
+        }
+        Ok(())
+    }
+}
+
+struct Notifier {
+    tx: mpsc::Sender<()>,
+}
+
+impl Notifier {
+    pub fn new(tx: mpsc::Sender<()>) -> Self {
+        Self { tx }
+    }
+
+    pub fn notify(&self) -> Result<()> {
+        let tx = self.tx.clone();
+        println!("Sending notification from notifier");
+        let sync_code = std::thread::spawn(move || tx.blocking_send(()));
+        let _ = sync_code.join().unwrap();
+        Ok(())
     }
 }
 

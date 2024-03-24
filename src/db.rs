@@ -10,6 +10,7 @@ use crate::stream::{Entry, Streams};
 
 use anyhow::Result;
 use bytes::{Buf, Bytes};
+use tokio::sync::mpsc;
 
 #[allow(dead_code)]
 pub struct DB {
@@ -186,6 +187,10 @@ impl DB {
 
     pub fn xread(&self, keys: &[&str], starts: &[&str]) -> Result<Vec<Entry>> {
         self.streams.read(keys, starts)
+    }
+
+    pub fn subscribe_to_stream(&self, key: &str, tx: mpsc::Sender<()>) -> Result<()> {
+        self.streams.subscribe_to_stream(key, tx)
     }
 
     pub fn streams(&self) -> &Streams {
