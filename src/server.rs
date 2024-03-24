@@ -18,6 +18,7 @@ pub struct Server {
     config: Config,
     storage: Arc<Storage>,
     state: Arc<SharedState>,
+    connections_counter: u64,
 }
 
 impl Server {
@@ -26,6 +27,7 @@ impl Server {
             config,
             storage,
             state: Arc::new(SharedState::new()),
+            connections_counter: 0,
         }
     }
 
@@ -34,11 +36,13 @@ impl Server {
             let master_conn = self.connect_to_master().await?;
             let storage = Arc::clone(&self.storage);
             let state = Arc::clone(&self.state);
+            self.connections_counter += 1;
             let mut handler = ConnectionHandler::new(
                 master_conn,
                 ConnectionMode::ReplicaToMaster,
                 storage,
                 state,
+                self.connections_counter,
             );
             tokio::spawn(async move {
                 handler
@@ -60,11 +64,13 @@ impl Server {
             println!("New connection from {}", addr);
             let storage = Arc::clone(&self.storage);
             let state = Arc::clone(&self.state);
+            self.connections_counter += 1;
             let mut handler = ConnectionHandler::new(
                 BufReader::new(stream),
                 ConnectionMode::Main,
                 storage,
                 state,
+                self.connections_counter,
             );
             tokio::spawn(async move {
                 handler

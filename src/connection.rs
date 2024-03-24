@@ -17,6 +17,7 @@ pub struct ConnectionHandler {
     storage: Arc<Storage>,
     state: Arc<SharedState>,
     mode: ConnectionMode,
+    connection_id: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -33,12 +34,14 @@ impl ConnectionHandler {
         mode: ConnectionMode,
         storage: Arc<Storage>,
         state: Arc<SharedState>,
+        connection_id: u64,
     ) -> Self {
         Self {
             stream,
             storage,
             state,
             mode,
+            connection_id,
         }
     }
 
@@ -60,6 +63,7 @@ impl ConnectionHandler {
                             println!("Replica {} disconnected", id);
                             self.remove_replica(id);
                         } else {
+                            self.storage.db.unsubscribe_from_all_streams(self.connection_id)?;
                             println!("Connection closed");
                         }
                         break;
@@ -149,7 +153,7 @@ impl ConnectionHandler {
                         if let Command::Xread{ stream_keys, starts, block: Some(timeout) } = &command {
                             let (tx, mut rx) = mpsc::channel::<()>(1);
                             for key in stream_keys {
-                                self.storage.db.subscribe_to_stream(key, tx.clone())?;
+                                self.storage.db.subscribe_to_stream(self.connection_id, key, tx.clone())?;
                             }
 
                             println!("> XREAD command - start waiting for {timeout} ms");
@@ -157,10 +161,16 @@ impl ConnectionHandler {
 
                             tokio::select! {
                                 _ = rx.recv() => {
+                                    for key in stream_keys {
+                                        self.storage.db.unsubscribe_from_stream(self.connection_id, key)?;
+                                    }
                                     command = Command::Xread{ stream_keys: stream_keys.to_vec(), starts: starts.to_vec(), block: None };
                                 }
                                 _ = timeout => {
                                     println!("> XREAD command - timouted");
+                                    for key in stream_keys {
+                                        self.storage.db.unsubscribe_from_stream(self.connection_id, key)?;
+                                    }
                                     // Sending (nil) response
                                     let response =  Bytes::from("$-1\r\n");
                                     self.stream.write_all(&response).await?;

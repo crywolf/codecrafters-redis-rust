@@ -189,8 +189,21 @@ impl DB {
         self.streams.read(keys, starts)
     }
 
-    pub fn subscribe_to_stream(&self, key: &str, tx: mpsc::Sender<()>) -> Result<()> {
-        self.streams.subscribe_to_stream(key, tx)
+    pub fn subscribe_to_stream(
+        &self,
+        connection_id: u64,
+        key: &str,
+        tx: mpsc::Sender<()>,
+    ) -> Result<()> {
+        self.streams.subscribe_to_stream(connection_id, key, tx)
+    }
+
+    pub fn unsubscribe_from_stream(&self, connection_id: u64, key: &str) -> Result<()> {
+        self.streams.unsubscribe_from_stream(connection_id, key)
+    }
+
+    pub fn unsubscribe_from_all_streams(&self, connection_id: u64) -> Result<()> {
+        self.streams.unsubscribe_from_all_streams(connection_id)
     }
 
     pub fn streams(&self) -> &Streams {

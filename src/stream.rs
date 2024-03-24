@@ -114,14 +114,47 @@ impl Streams {
             .contains_key(stream_key)
     }
 
-    pub fn subscribe_to_stream(&self, stream_key: &str, tx: mpsc::Sender<()>) -> Result<()> {
+    pub fn subscribe_to_stream(
+        &self,
+        connection_id: u64,
+        stream_key: &str,
+        tx: mpsc::Sender<()>,
+    ) -> Result<()> {
         self.streams
             .lock()
             .expect("should be able lock the mutex")
             .entry(stream_key.to_owned())
-            .and_modify(|e| e.notifiers.push(Notifier::new(tx)));
+            .and_modify(|e| {
+                e.notifiers.insert(connection_id, Notifier::new(tx));
+                println!("Subscribed to notifications for stream '{stream_key}'");
+            });
 
-        println!("Subscribed to notifications for stream '{stream_key}'");
+        Ok(())
+    }
+
+    pub fn unsubscribe_from_stream(&self, connection_id: u64, stream_key: &str) -> Result<()> {
+        self.streams
+            .lock()
+            .expect("should be able lock the mutex")
+            .entry(stream_key.to_owned())
+            .and_modify(|e| {
+                e.notifiers.remove(&connection_id);
+                println!("Unsubscribed from notifications for stream '{stream_key}'");
+            });
+
+        Ok(())
+    }
+
+    pub fn unsubscribe_from_all_streams(&self, connection_id: u64) -> Result<()> {
+        println!("Unsubscribing connection '{connection_id}' from notifications for all streams (if any)");
+
+        let mut streams = self.streams.lock().expect("should be able lock the mutex");
+
+        for (stream_key, stream) in streams.iter_mut() {
+            if stream.notifiers.remove(&connection_id).is_some() {
+                println!("Unsubscribed  connection '{connection_id})'from notifications for stream '{stream_key}'");
+            }
+        }
 
         Ok(())
     }
@@ -131,7 +164,7 @@ struct Stream {
     max_time: u64,
     max_sequence_num: u64,
     entries: Vec<Entry>,
-    notifiers: Vec<Notifier>,
+    notifiers: HashMap<u64, Notifier>,
 }
 
 impl Stream {
@@ -140,7 +173,7 @@ impl Stream {
             max_time: 0,
             max_sequence_num: 0,
             entries: Vec::new(),
-            notifiers: Vec::new(),
+            notifiers: HashMap::new(),
         }
     }
 
@@ -189,13 +222,14 @@ impl Stream {
     }
 
     pub fn notify(&self) -> Result<()> {
-        for n in self.notifiers.iter() {
+        for (_, n) in self.notifiers.iter() {
             n.notify()?;
         }
         Ok(())
     }
 }
 
+#[derive(Debug)]
 struct Notifier {
     tx: mpsc::Sender<()>,
 }
