@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Ok, Result};
+use anyhow::{anyhow, bail, Context, Ok, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, sync::Mutex};
 use tokio::sync::mpsc;
@@ -90,16 +90,27 @@ impl Streams {
                 .get(stream_key)
                 .context(format!("range querying stream '{stream_key}'"))?;
 
-            let mut range: Vec<_> = stream
-                .entries
-                .iter()
-                .filter(|&e| e.raw_id.as_str() > nstart && e.raw_id.as_str() <= nend)
-                .cloned()
-                .map(|mut e| {
-                    e.stream_key = Some(stream_key.to_string());
-                    e
-                })
-                .collect();
+            let mut range: Vec<Entry>;
+            if start == "$" {
+                let mut last = stream
+                    .entries
+                    .last()
+                    .cloned()
+                    .ok_or(anyhow!("range querying stream '{stream_key}'"))?;
+                last.stream_key = Some(stream_key.to_owned());
+                range = vec![last];
+            } else {
+                range = stream
+                    .entries
+                    .iter()
+                    .filter(|&e| e.raw_id.as_str() > nstart && e.raw_id.as_str() <= nend)
+                    .cloned()
+                    .map(|mut e| {
+                        e.stream_key = Some(stream_key.to_string());
+                        e
+                    })
+                    .collect();
+            }
 
             response.append(&mut range);
         }

@@ -844,6 +844,24 @@ mod tests {
 
         let response = r.unwrap();
         assert_eq!(response, Bytes::from_static(b"*1\r\n*2\r\n$10\r\nstream_key\r\n*1\r\n*2\r\n$3\r\n0-2\r\n*2\r\n$11\r\ntemperature\r\n$2\r\n95\r\n"));
+
+        // xadd different_key 0-1 temperature 91
+        let command = "*5\r\n$4\r\nXADD\r\n$13\r\ndifferent_key\r\n$3\r\n0-1\r\n$11\r\ntemperature\r\n$2\r\n91\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        // xadd different_key 0-2 temperature 89
+        let command = "*5\r\n$4\r\nXADD\r\n$13\r\ndifferent_key\r\n$3\r\n0-2\r\n$11\r\ntemperature\r\n$2\r\n89\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        // xread block 0 streams different_key $
+        let command = "*6\r\n$5\r\nXREAD\r\n$5\r\nBLOCK\r\n$1\r\n0\r\n$7\r\nSTREAMS\r\n$13\r\ndifferent_key\r\n$1\r\n$\r\n";
+        let r = call_command(command, Arc::clone(&storage));
+        assert!(r.is_ok());
+
+        let response = r.unwrap();
+        assert_eq!(response, Bytes::from_static(b"*1\r\n*2\r\n$13\r\ndifferent_key\r\n*1\r\n*2\r\n$3\r\n0-2\r\n*2\r\n$11\r\ntemperature\r\n$2\r\n89\r\n"));
     }
 
     /// helper function
